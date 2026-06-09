@@ -185,6 +185,12 @@ describe('mapToolResultToMiniMax', () => {
     if (isToolSchemaError(out)) {
       fail(`expected a wire message, got error: ${out.kind}`);
     }
+    // T04 widened `MiniMaxWireMessage.content` to a `string |
+    // content-parts array`. The T03 mapper always returns a string
+    // for tool results, so narrow to that here.
+    if (typeof out.content !== 'string') {
+      fail(`expected string content from the T03 mapper`);
+    }
     deepStrictEqual(JSON.parse(out.content), { complex: 'object', n: 1 });
     equal(out.toolCallId, 'call_struct');
   });
