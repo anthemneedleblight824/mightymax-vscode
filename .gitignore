@@ -1,0 +1,17 @@
+tasks/
+AGENTS.md
+features.json
+IMPLEMENTATION_PLAN.md
+PROGRESS.md
+.vscode/
+.github/copilot-instructions.md
+mighty-max-plan.toml
+docs/dev/
+.npm-cache/
+.npm-tmp/
+.coraline/
+node_modules/
+out/
+dist/
+*.vsix
+.DS_Store

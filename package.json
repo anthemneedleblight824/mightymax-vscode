@@ -1,0 +1,116 @@
+{
+  "name": "mighty-max",
+  "displayName": "Mighty Max",
+  "description": "MiniMax M-series language models for VS Code Chat (BYOK)",
+  "version": "0.0.1",
+  "publisher": "greysquirr3l",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.104.0",
+    "node": ">=20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/greysquirr3l/mighty-max.git"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "keywords": [
+    "chat",
+    "ai",
+    "minimax",
+    "language-models",
+    "byok"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "mightyMax.manage",
+        "title": "Manage Mighty Max (Set API Key)",
+        "category": "Mighty Max"
+      }
+    ],
+    "languageModelChatProviders": [
+      {
+        "vendor": "minimax",
+        "displayName": "Mighty Max (MiniMax)",
+        "managementCommand": "mightyMax.manage"
+      }
+    ],
+    "configuration": {
+      "title": "Mighty Max",
+      "properties": {
+        "mightyMax.baseUrl": {
+          "type": "string",
+          "default": "https://api.minimax.io",
+          "description": "MiniMax API base URL. The API key is never stored here — it lives in SecretStorage.",
+          "scope": "application"
+        },
+        "mightyMax.logLevel": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "default": "info",
+          "description": "Log level for Mighty Max. Logs never contain the API key, Authorization header, or request/response bodies.",
+          "scope": "window"
+        }
+      }
+    }
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "restrictedConfigurations": [
+        "mightyMax.baseUrl"
+      ]
+    },
+    "virtualWorkspaces": {
+      "supported": "limited"
+    }
+  },
+  "scripts": {
+    "clean": "rimraf out dist",
+    "typecheck": "tsc -p . --noEmit",
+    "compile": "tsc -p . && node esbuild.config.mjs",
+    "watch": "tsc -w -p .",
+    "vscode:prepublish": "tsc -p . && node esbuild.config.mjs --minify",
+    "lint": "eslint src --max-warnings 0",
+    "lint:fix": "eslint src --max-warnings 0 --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"*.{json,md}\"",
+    "test": "node .vscode-test.mjs",
+    "test:unit": "node .vscode-test.mjs --label unit",
+    "test:integration": "node .vscode-test.mjs --label integration",
+    "package": "vsce package --out ./mighty-max.vsix"
+  },
+  "dependencies": {},
+  "overrides": {
+    "serialize-javascript": "^7.0.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.13.0",
+    "@types/mocha": "10.0.10",
+    "@types/node": "20.17.6",
+    "@types/vscode": "1.104.0",
+    "@vscode/test-cli": "0.0.10",
+    "@vscode/test-electron": "2.4.1",
+    "esbuild": "0.24.0",
+    "eslint": "9.13.0",
+    "mocha": "10.8.0",
+    "prettier": "3.3.3",
+    "rimraf": "6.0.1",
+    "typescript": "5.6.3",
+    "typescript-eslint": "8.12.2",
+    "vsce": "2.15.0"
+  }
+}
