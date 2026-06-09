@@ -2,6 +2,14 @@ import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 
 const EXTENSION_ID = 'greysquirr3l.mighty-max';
+const MINIMAX_VENDOR = 'minimax';
+const EXPECTED_MODEL_IDS = [
+  'MiniMax-M1',
+  'MiniMax-M2',
+  'MiniMax-M2.5',
+  'MiniMax-M2.7',
+  'MiniMax-M3',
+];
 
 suite('Extension smoke', () => {
   test('activates without throwing', async () => {
@@ -61,5 +69,48 @@ suite('Manifest contract', () => {
     const untrusted = capabilities.untrustedWorkspaces as { supported?: string } | undefined;
     assert.ok(untrusted, 'capabilities.untrustedWorkspaces is missing');
     assert.equal(untrusted.supported, 'limited');
+  });
+});
+
+suite('Language model catalog (T02)', () => {
+  test('VS Code can select the minimax vendor', async () => {
+    const models = await vscode.lm.selectChatModels({ vendor: MINIMAX_VENDOR });
+    assert.ok(Array.isArray(models), 'selectChatModels must return an array');
+    assert.ok(models.length > 0, 'no MiniMax models registered');
+  });
+
+  test('every expected M-series model id is present', async () => {
+    const models = await vscode.lm.selectChatModels({ vendor: MINIMAX_VENDOR });
+    const ids = new Set(models.map((m) => m.id));
+    for (const id of EXPECTED_MODEL_IDS) {
+      assert.ok(ids.has(id), `expected model id ${id} missing from the catalog`);
+    }
+  });
+
+  test('every catalog entry has the minimax family and a non-empty display name', async () => {
+    const models = await vscode.lm.selectChatModels({ vendor: MINIMAX_VENDOR });
+    for (const m of models) {
+      assert.equal(m.family, MINIMAX_VENDOR, `${m.id} family must be "minimax"`);
+      assert.ok(typeof m.name === 'string' && m.name.length > 0, `${m.id} needs a display name`);
+      assert.ok(typeof m.vendor === 'string' && m.vendor.length > 0, `${m.id} needs a vendor`);
+    }
+  });
+
+  test('every entry has a positive maxInputTokens budget', async () => {
+    const models = await vscode.lm.selectChatModels({ vendor: MINIMAX_VENDOR });
+    for (const m of models) {
+      assert.ok(m.maxInputTokens > 0, `${m.id} maxInputTokens must be > 0`);
+    }
+  });
+
+  test('M3 has the largest input budget (1M+ ctx) and is a distinct id from M2.x', async () => {
+    const models = await vscode.lm.selectChatModels({ vendor: MINIMAX_VENDOR });
+    const m3 = models.find((m) => m.id === 'MiniMax-M3');
+    const m2 = models.find((m) => m.id === 'MiniMax-M2');
+    assert.ok(m3 && m2, 'both M3 and M2 must be present');
+    assert.ok(
+      m3.maxInputTokens > m2.maxInputTokens,
+      `M3 (${m3.maxInputTokens}) must have a larger input budget than M2 (${m2.maxInputTokens})`,
+    );
   });
 });

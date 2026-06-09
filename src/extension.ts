@@ -29,7 +29,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const logger = new LoggerAdapter(channel, initialLevel);
   const secretStore = new SecretStoreAdapter(context.secrets);
   const client = new MiniMaxClientAdapter(baseUrl, 'openai');
-  const catalog = new CatalogAdapter();
+  const catalog = new CatalogAdapter(logger);
   const chatProvider = new ChatProvider(logger, secretStore, client, catalog);
 
   context.subscriptions.push(

@@ -1,3 +1,5 @@
+import type { Event } from 'vscode';
+
 /**
  * ModelCatalog — port for the static + dynamic list of MiniMax chat models
  * that this extension advertises to VS Code's chat model picker.
@@ -6,7 +8,26 @@
  * this port is the seam between the domain (pure data + rules) and the
  * adapter that turns catalog entries into
  * `vscode.LanguageModelChatInformation[]` for `provideLanguageModelChatInformation`.
+ *
+ * The `onDidChange` event is consumed by `ChatProvider` to re-emit
+ * `onDidChangeLanguageModelChatInformation` so the picker refreshes
+ * when the catalog (e.g. the live list fetched from `/v1/models`)
+ * changes. Adapters that have no live list can return
+ * `new vscode.EventEmitter<void>().event` (it just never fires).
  */
+
+/**
+ * How a model surfaces its thinking content in the MiniMax stream.
+ *  - `anthropic` — M3 (and forward) on the Anthropic-compatible endpoint emits
+ *    first-class `thinking` blocks interleaved with text and tool calls.
+ *  - `openai`    — M2.x on the OpenAI-compatible endpoint emits reasoning
+ *    as a separate `reasoning_content` delta in the chunk stream.
+ *  - `none`      — no native thinking; the model answers directly.
+ *
+ * The transport layer (T05) reads this field to pick the right wire schema.
+ */
+export type ThinkingStyle = 'anthropic' | 'openai' | 'none';
+
 export interface ModelInfo {
   /** Stable MiniMax model id used in API requests (e.g. "MiniMax-M3"). */
   id: string;
@@ -14,14 +35,19 @@ export interface ModelInfo {
   displayName: string;
   /** Vendor id used in the `languageModelChatProviders` contribution. */
   vendor: string;
-  /** Family/grouping for picker UI ("m3", "m2", etc). */
+  /** Family/grouping for picker UI. The MiniMax hint uses "minimax" so every
+   *  entry groups under a single family in the model picker. */
   family: string;
-  /** Maximum input token count for the model. */
+  /** Maximum input token count for the model (= total ctx − max output). */
   maxInputTokens: number;
   /** Maximum output token count for the model. */
   maxOutputTokens: number;
   /** Capability flags; `toolCalling` gates agent-mode eligibility. */
   capabilities: ModelCapabilities;
+  /** How the model emits its thinking content, if any. */
+  thinkingStyle: ThinkingStyle;
+  /** Short, human-readable subtitle shown in the picker ("200K ctx, 8K out"). */
+  detail: string;
 }
 
 export interface ModelCapabilities {
@@ -32,8 +58,11 @@ export interface ModelCapabilities {
 }
 
 export interface ModelCatalog {
-  /** All models the extension supports. */
+  /** All models the extension supports (static list merged with any live list). */
   listModels(): Promise<ReadonlyArray<ModelInfo>>;
   /** Lookup by id; returns undefined if the model is not in the catalog. */
   getModel(id: string): Promise<ModelInfo | undefined>;
+  /** Fires when the catalog contents change. Adapters that never change
+   *  (e.g. a read-only test stub) may return an event that never fires. */
+  readonly onDidChange: Event<void>;
 }

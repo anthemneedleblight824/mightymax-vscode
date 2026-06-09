@@ -57,6 +57,10 @@ export default tseslint.config(
       // is the whole point of the manifest contract test below.
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
+      // `describe` / `it` from `node:test` are async (`Promise<void>`)
+      // and the test runner awaits them internally; floating-promises
+      // over-fires in this exact pattern.
+      '@typescript-eslint/no-floating-promises': 'off',
     },
   },
 );
