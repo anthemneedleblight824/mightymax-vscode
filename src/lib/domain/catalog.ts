@@ -320,17 +320,19 @@ function fillLiveDefaults(
       ? raw.displayName
       : `${defaults.displayNamePrefix} (${id})`;
 
-  const thinking =
-    raw.capabilities.thinking === true ||
-    raw.thinkingStyle === 'anthropic' ||
-    raw.thinkingStyle === 'openai';
+  // For unknown live models we FORCE the curated defaults rather
+  // than merging the API's claim with the defaults. The `??` merge
+  // would let a `false` value the API happens to ship for an unknown
+  // model silently hide it from agent mode (AGENTS.md: a model
+  // WITHOUT `toolCalling` is hidden). Erring on the side of
+  // advertising unknown models as agent-capable is the safer default.
+  const thinkingStyle: ThinkingStyle = defaults.thinkingStyle;
+  const thinking = thinkingStyle !== 'none';
   const capabilities: ModelCapabilities = {
-    toolCalling: raw.capabilities?.toolCalling ?? defaults.capabilities.toolCalling,
-    imageInput: raw.capabilities?.imageInput ?? defaults.capabilities.imageInput,
+    toolCalling: defaults.capabilities.toolCalling,
+    imageInput: defaults.capabilities.imageInput,
     thinking,
   };
-  const thinkingStyle: ThinkingStyle =
-    raw.thinkingStyle ?? (thinking ? defaults.thinkingStyle : 'none');
 
   const detail =
     raw.detail && raw.detail.length > 0
