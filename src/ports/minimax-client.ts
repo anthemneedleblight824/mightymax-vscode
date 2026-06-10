@@ -55,6 +55,12 @@ export interface MiniMaxCompletionRequest {
   temperature?: number;
   maxTokens?: number;
   stream: true;
+  /**
+   * Optional dialect override. When omitted, the transport picks
+   * `'anthropic'` for M3 (M3 is the only model with native thinking
+   * blocks) and `'openai'` for everything else.
+   */
+  dialect?: MiniMaxDialect;
 }
 
 export interface MiniMaxUsageDelta {
@@ -99,15 +105,17 @@ export interface MiniMaxStreamEvent {
  *
  * Implemented in `src/adapters/transport.ts` (T05). The implementation
  * talks to platform.minimax.io over SSE in either OpenAI-compatible or
- * Anthropic-compatible dialect; the dialect is a constructor concern,
- * not a per-call one. Authentication is supplied by the caller via
- * `apiKey` — the adapter never persists it.
+ * Anthropic-compatible dialect; the dialect is selected per request from
+ * the model id (M3 → Anthropic, everything else → OpenAI) and can be
+ * overridden with `MiniMaxCompletionRequest.dialect`. Authentication is
+ * supplied by the caller via `apiKey` — the adapter never persists it.
  */
 export interface MiniMaxClient {
   /**
    * Open a streaming completion. Yields events until the stream terminates.
-   * Throws on transport-level failures (DNS, TLS, non-2xx HTTP); per-event
-   * stream errors arrive as `MiniMaxStreamEvent.error` and do not throw.
+   * Throws on transport-level failures (DNS, TLS, non-2xx HTTP, rate-limit
+   * exhaustion, parse errors); per-event stream errors arrive as
+   * `MiniMaxStreamEvent.error` and do not throw.
    */
   streamCompletion(
     request: MiniMaxCompletionRequest,
@@ -115,4 +123,49 @@ export interface MiniMaxClient {
     signal: AbortSignal,
     logger: Logger,
   ): AsyncIterable<MiniMaxStreamEvent>;
+}
+
+/**
+ * Dialect hint for the transport. The default selector in T05 picks
+ * `'anthropic'` for M3 and `'openai'` for everything else; an explicit
+ * `dialect` on the request wins over the default.
+ */
+export type MiniMaxDialect = 'openai' | 'anthropic';
+
+/**
+ * Typed error envelope. The chat-provider (T07) catches this and
+ * surfaces it as a chat error so the extension host never crashes.
+ *
+ * `kind` discriminates the failure mode:
+ *  - `auth`        — 401/403; the API key is invalid or revoked.
+ *  - `rate-limit`  — 429 after the bounded retry budget is exhausted.
+ *  - `http`        — non-2xx status that is not auth or rate-limit.
+ *  - `network`     — DNS, TLS, connection reset, fetch threw.
+ *  - `parse`       — SSE bytes could not be decoded or contained
+ *                    malformed JSON.
+ *  - `abort`       — caller cancelled the request via AbortSignal.
+ */
+export type MiniMaxClientErrorKind = 'auth' | 'rate-limit' | 'http' | 'network' | 'parse' | 'abort';
+
+export class MiniMaxClientError extends Error {
+  public readonly kind: MiniMaxClientErrorKind;
+  public readonly status?: number;
+  public readonly retriable: boolean;
+
+  constructor(
+    kind: MiniMaxClientErrorKind,
+    message: string,
+    options: { status?: number; retriable?: boolean; cause?: unknown } = {},
+  ) {
+    super(message);
+    this.name = 'MiniMaxClientError';
+    this.kind = kind;
+    if (options.status !== undefined) {
+      this.status = options.status;
+    }
+    this.retriable = options.retriable ?? false;
+    if (options.cause !== undefined) {
+      this.cause = options.cause;
+    }
+  }
 }

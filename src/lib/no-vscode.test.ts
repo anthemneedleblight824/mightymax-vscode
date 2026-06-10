@@ -14,11 +14,13 @@ import { dirname, join, relative, sep } from 'node:path';
 
 // This file compiles to CommonJS for the test runner, so use the
 // CommonJS-native `__filename` / `__dirname` rather than `import.meta.url`.
-// The compiled .js lives under out/lib/, so two `..` steps land on the
-// workspace root.
+// The compiled .js lives under out/lib/, so we walk back to the source
+// tree at src/lib/ — the static guard inspects the TypeScript sources
+// (so comments and string literals are not preprocessed away by tsc).
 const here = __filename;
-const libDir = dirname(here);
-const root = join(libDir, '..', '..');
+const outDir = dirname(here);
+const root = join(outDir, '..', '..');
+const libDir = join(root, 'src', 'lib');
 
 const FORBIDDEN_IMPORT_PATTERNS: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
   { pattern: /from\s+['"]vscode['"]/, reason: 'direct vscode module import' },
@@ -41,10 +43,10 @@ function* walk(directory: string): Generator<string> {
   }
 }
 
-suite('Domain layer purity (src/lib/)', () => {
+describe('Domain layer purity (src/lib/)', () => {
   for (const file of walk(libDir)) {
     const rel = relative(root, file).split(sep).join('/');
-    test(`no I/O imports in ${rel}`, () => {
+    it(`no I/O imports in ${rel}`, () => {
       const source = readFileSync(file, 'utf8');
       for (const { pattern, reason } of FORBIDDEN_IMPORT_PATTERNS) {
         const match = source.match(pattern);

@@ -44,21 +44,19 @@
  * by emitting usage in an `unknown` part the host can introspect).
  */
 
-import { LanguageModelTextPart, LanguageModelToolCallPart, LanguageModelToolResultPart } from 'vscode';
-import type {
-  LanguageModelChatMessageRole,
-  LanguageModelChatRequestMessage,
+import {
+  LanguageModelTextPart,
+  LanguageModelToolCallPart,
+  LanguageModelToolResultPart,
 } from 'vscode';
+import type { LanguageModelChatMessageRole, LanguageModelChatRequestMessage } from 'vscode';
 
 import type { ChatToolCallPart, ChatToolResultPart } from './tool-schema.js';
 
 // Re-exports of vscode types so the chat-provider (T07) can
 // reference them via this port file rather than importing vscode
 // directly in its provider code.
-export type {
-  LanguageModelChatMessageRole,
-  LanguageModelChatRequestMessage,
-};
+export type { LanguageModelChatMessageRole, LanguageModelChatRequestMessage };
 
 /**
  * A domain-neutral message role. The full `vscode.LanguageModelChatMessageRole`

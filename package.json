@@ -88,9 +88,9 @@
     "lint": "eslint src --max-warnings 0",
     "lint:fix": "eslint src --max-warnings 0 --fix",
     "format": "prettier --write \"src/**/*.ts\" \"*.{json,md}\"",
-    "test": "node .vscode-test.mjs",
-    "test:unit": "node .vscode-test.mjs --label unit",
-    "test:integration": "node .vscode-test.mjs --label integration",
+    "test": "node node_modules/@vscode/test-cli/out/bin.mjs",
+    "test:unit": "node node_modules/@vscode/test-cli/out/bin.mjs --label unit",
+    "test:integration": "node node_modules/@vscode/test-cli/out/bin.mjs --label integration",
     "package": "vsce package --out ./mighty-max.vsix"
   },
   "dependencies": {},

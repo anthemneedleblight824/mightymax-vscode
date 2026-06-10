@@ -24,11 +24,15 @@ export function activate(context: vscode.ExtensionContext): void {
   const config = vscode.workspace.getConfiguration('mightyMax');
   const logLevelRaw = config.get<unknown>('logLevel');
   const initialLevel: LogLevel = isLogLevel(logLevelRaw) ? logLevelRaw : 'info';
-  const baseUrl = config.get<string>('baseUrl') ?? 'https://api.minimax.io';
+  const DEFAULT_BASE_URL = 'https://api.minimax.io';
+  // The baseUrl is read on every request via this callback so config
+  // changes are honored without restarting the extension host.
+  const baseUrl = (): string =>
+    vscode.workspace.getConfiguration('mightyMax').get<string>('baseUrl') ?? DEFAULT_BASE_URL;
 
   const logger = new LoggerAdapter(channel, initialLevel);
   const secretStore = new SecretStoreAdapter(context.secrets);
-  const client = new MiniMaxClientAdapter(baseUrl, 'openai');
+  const client = new MiniMaxClientAdapter({ baseUrl });
   const catalog = new CatalogAdapter(logger);
   const chatProvider = new ChatProvider(logger, secretStore, client, catalog);
 
@@ -41,12 +45,16 @@ export function activate(context: vscode.ExtensionContext): void {
       // against the MiniMax /models endpoint, and store it on success.
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (!event.affectsConfiguration('mightyMax.logLevel')) return;
-      const next = vscode.workspace.getConfiguration('mightyMax').get<unknown>('logLevel');
-      if (isLogLevel(next)) {
-        logger.setLevel(next);
-        logger.info('Log level updated', { level: next });
+      if (event.affectsConfiguration('mightyMax.logLevel')) {
+        const next = vscode.workspace.getConfiguration('mightyMax').get<unknown>('logLevel');
+        if (isLogLevel(next)) {
+          logger.setLevel(next);
+          logger.info('Log level updated', { level: next });
+        }
       }
+      // baseUrl re-reads happen via the callback above; no action needed
+      // here other than noting that the next request will pick up the
+      // new value automatically.
     }),
   );
 
@@ -55,7 +63,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.Disposable.from({ dispose: () => logger.info('Mighty Max extension deactivated') }),
   );
 
-  logger.info('Mighty Max extension activated', { vendor: 'minimax', baseUrl });
+  logger.info('Mighty Max extension activated', { vendor: 'minimax', baseUrl: baseUrl() });
 }
 
 export function deactivate(): void {

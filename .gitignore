@@ -13,5 +13,7 @@ docs/dev/
 node_modules/
 out/
 dist/
+.tmp-test/
+.vscode-test/
 *.vsix
 .DS_Store
