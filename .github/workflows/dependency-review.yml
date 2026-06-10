@@ -1,0 +1,31 @@
+name: Dependency Review
+
+# Blocks PRs that introduce dependencies with known vulnerabilities,
+# incompatible licenses, or from blocked package origins.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          # Block PRs that introduce vulnerabilities (moderate or higher)
+          fail-on-severity: moderate
+          # Allow common permissive licenses used in npm ecosystem
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, CC0-1.0
+          comment-summary-in-pr: on-failure

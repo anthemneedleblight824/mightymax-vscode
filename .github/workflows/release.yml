@@ -1,0 +1,228 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g., v0.1.0)"
+        required: true
+        type: string
+
+# Concurrency: one release at a time per tag
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  resolve-tag:
+    name: Resolve release tag and SHA
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      sha: ${{ steps.tag.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine tag and SHA
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+            SHA=$(git rev-list -n 1 "$TAG" 2>/dev/null || true)
+            if [[ -z "$SHA" ]]; then
+              echo "Tag $TAG not found" >&2
+              exit 1
+            fi
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+            SHA="${GITHUB_SHA}"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Resolved: tag=$TAG sha=$SHA"
+
+  verify-ci:
+    name: Verify CI is green
+    runs-on: ubuntu-latest
+    needs: [resolve-tag]
+    timeout-minutes: 15
+
+    steps:
+      - name: Wait for CI workflow result on tagged commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ needs.resolve-tag.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          sha="${RELEASE_SHA}"
+          repo="${GITHUB_REPOSITORY}"
+          api="https://api.github.com/repos/${repo}/actions/runs?head_sha=${sha}&event=push&per_page=50"
+
+          echo "Checking CI status for ${repo}@${sha}"
+
+          for attempt in {1..30}; do
+            json=$(curl -fsSL \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${api}")
+
+            ci_status=$(echo "${json}" | jq -r '.workflow_runs[] | select(.name == "CI") | .status' | head -n1)
+            ci_conclusion=$(echo "${json}" | jq -r '.workflow_runs[] | select(.name == "CI") | .conclusion' | head -n1)
+
+            if [[ -z "${ci_status}" ]]; then
+              echo "Attempt ${attempt}/30: CI workflow run not found yet; waiting..."
+              sleep 20
+              continue
+            fi
+
+            if [[ "${ci_status}" != "completed" ]]; then
+              echo "Attempt ${attempt}/30: CI is ${ci_status}; waiting..."
+              sleep 20
+              continue
+            fi
+
+            if [[ "${ci_conclusion}" == "success" ]]; then
+              echo "CI completed successfully for ${sha}"
+              exit 0
+            fi
+
+            echo "CI did not pass for ${sha}: conclusion=${ci_conclusion}"
+            exit 1
+          done
+
+          echo "Timed out waiting for CI completion on ${sha}"
+          exit 1
+
+  build:
+    name: Build VSIX
+    runs-on: ubuntu-latest
+    needs: [resolve-tag, verify-ci]
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.resolve-tag.outputs.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build extension
+        run: npm run package
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mighty-max-vsix
+          path: mighty-max.vsix
+          retention-days: 7
+
+  publish:
+    name: Publish to Marketplaces
+    needs: [resolve-tag, verify-ci, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.resolve-tag.outputs.sha }}
+
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mighty-max-vsix
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: 20
+
+      - name: Install vsce and ovsx
+        run: npm install -g @vscode/vsce ovsx
+
+      - name: Publish to VS Code Marketplace
+        if: ${{ !contains(needs.resolve-tag.outputs.tag, '-') }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [[ -z "${VSCE_PAT}" ]]; then
+            echo "Warning: VSCE_PAT secret not set, skipping VS Code Marketplace publish"
+            exit 0
+          fi
+          vsce publish --packagePath mighty-max.vsix --pat "${VSCE_PAT}"
+
+      - name: Publish pre-release to VS Code Marketplace
+        if: ${{ contains(needs.resolve-tag.outputs.tag, '-') }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [[ -z "${VSCE_PAT}" ]]; then
+            echo "Warning: VSCE_PAT secret not set, skipping VS Code Marketplace publish"
+            exit 0
+          fi
+          vsce publish --pre-release --packagePath mighty-max.vsix --pat "${VSCE_PAT}"
+
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [[ -z "${OVSX_PAT}" ]]; then
+            echo "Warning: OVSX_PAT secret not set, skipping Open VSX publish"
+            exit 0
+          fi
+          ovsx publish mighty-max.vsix --pat "${OVSX_PAT}"
+
+  release:
+    name: Create GitHub Release
+    needs: [resolve-tag, verify-ci, build, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download VSIX artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mighty-max-vsix
+
+      - name: Generate checksum
+        shell: bash
+        run: sha256sum mighty-max.vsix > SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        with:
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          target_commitish: ${{ needs.resolve-tag.outputs.sha }}
+          name: "Mighty Max ${{ needs.resolve-tag.outputs.tag }}"
+          draft: false
+          prerelease: ${{ contains(needs.resolve-tag.outputs.tag, '-') }}
+          generate_release_notes: true
+          files: |
+            mighty-max.vsix
+            SHA256SUMS.txt
