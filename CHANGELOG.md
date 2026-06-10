@@ -4,6 +4,17 @@ All notable changes to Mighty Max are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/) and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] — 2026-06-10
+
+### Fixed
+
+- **Transport double-read of error body**: `MiniMaxClientAdapter` no longer crashes with `Body is unusable: Body has already been read` on 4xx/5xx responses. The error body is now read once and re-wrapped into a new `Response` so logging and error propagation both have access to it (was previously the case in `error_from_console.txt`).
+- **Anthropic `tool_use` blocks lost across turns**: `mapRequestToMiniMax` now preserves `tool-call` parts in assistant history (instead of warning and dropping them), so Anthropic `tool_use`/`tool_result` round-trips survive across multi-round agent loops.
+- **MiniMax Anthropic endpoint authentication**: switched from `x-api-key` to `Authorization: Bearer` to match MiniMax's actual Anthropic-compatible endpoint requirements.
+- **Anthropic message ordering**: leading assistant text is now folded into the system prompt so the Anthropic `messages` array always begins with a user turn (Anthropic API requirement), while tool calls are preserved.
+- **Anthropic tool schema conversion**: OpenAI-format tools and `tool_choice` are now translated to Anthropic's `input_schema` and `{type,name}` shape.
+- **Temperature clamping**: outgoing `temperature` is now clamped to `[0, 2]` for both MiniMax dialects.
+
 ## [0.1.0] — 2026-06-10
 
 ### Added

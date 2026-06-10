@@ -195,6 +195,7 @@ export function mapRequestToMiniMax(
     const textParts: string[] = [];
     const richParts: MiniMaxWireContentPart[] = [];
     const toolResults: Array<{ callId: string; content: string }> = [];
+    const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
     let sawAnyPart = false;
 
     for (const part of msg.content) {
@@ -213,13 +214,12 @@ export function mapRequestToMiniMax(
         continue;
       }
       if (part.type === 'tool-call') {
-        // Tool calls appear in assistant turns emitted by the model,
-        // not in user-supplied request messages. If one sneaks in,
-        // surface a warning and skip — the model already has the
-        // wire history of the prior call.
-        warnings.push({
-          kind: 'unsupported-content',
-          reason: 'tool-call in request content (must come from assistant history, not user)',
+        // Tool calls from assistant history need to be preserved so that
+        // corresponding tool_results can reference them by ID.
+        toolCalls.push({
+          id: part.toolCall.callId,
+          name: part.toolCall.name,
+          arguments: JSON.stringify(part.toolCall.input ?? {}),
         });
         continue;
       }
@@ -264,9 +264,10 @@ export function mapRequestToMiniMax(
       continue;
     }
 
-    if (textParts.length > 0 || richParts.length > 0) {
+    if (textParts.length > 0 || richParts.length > 0 || toolCalls.length > 0) {
       const hasImages = richParts.length > 0;
       const hasText = textParts.length > 0;
+      const hasToolCalls = toolCalls.length > 0;
       let content: string | ReadonlyArray<MiniMaxWireContentPart>;
       if (hasImages) {
         const parts: MiniMaxWireContentPart[] = [];
@@ -278,7 +279,15 @@ export function mapRequestToMiniMax(
       } else {
         content = textParts.join('\n');
       }
-      wireMessages.push({ role: msg.role, content });
+      const wireMsg: MiniMaxWireMessage = { role: msg.role, content };
+      if (hasToolCalls && msg.role === 'assistant') {
+        wireMsg.toolCalls = toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: { name: tc.name, arguments: tc.arguments },
+        }));
+      }
+      wireMessages.push(wireMsg);
     } else if (msg.role === 'assistant') {
       // Assistant turn that contained no text or image parts but is
       // still a valid turn boundary (e.g. the prior assistant emitted

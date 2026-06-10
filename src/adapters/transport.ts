@@ -138,7 +138,6 @@ export class MiniMaxClientAdapter implements MiniMaxClient {
         if (response.ok) {
           return response;
         }
-        await response.body?.cancel().catch(() => undefined);
         const status = response.status;
         if (status === 429) {
           if (attempt < maxAttempts) {
@@ -166,7 +165,26 @@ export class MiniMaxClientAdapter implements MiniMaxClient {
         if (status === 401 || status === 403) {
           throw new MiniMaxClientError('auth', `MiniMax returned ${status}`, { status });
         }
-        throw new MiniMaxClientError('http', `MiniMax returned ${status}`, { status });
+        // Log the full request for 400 errors to help diagnose format issues
+        if (status === 400) {
+          const requestBody =
+            dialect === 'anthropic'
+              ? serializeAnthropicRequest(request)
+              : serializeOpenAiRequest(request);
+          logger.error(
+            `MiniMax 400 Bad Request - dialect=${dialect}, model=${request.model}, request=${JSON.stringify(requestBody)}`,
+          );
+        }
+        // Read error body for debugging (already pre-read in dispatch method)
+        let errorDetail = '';
+        const errorBody = await response.text().catch(() => '');
+        if (errorBody) {
+          errorDetail = `: ${errorBody}`;
+          if (status === 400) {
+            logger.error(`MiniMax 400 Bad Request - Response: ${errorBody}`);
+          }
+        }
+        throw new MiniMaxClientError('http', `MiniMax returned ${status}${errorDetail}`, { status });
       } catch (err) {
         if (err instanceof MiniMaxClientError) {
           if (err.kind === 'abort') throw err;
@@ -217,11 +235,10 @@ export class MiniMaxClientAdapter implements MiniMaxClient {
       'content-type': 'application/json',
       accept: 'text/event-stream',
     };
+    // MiniMax uses Authorization: Bearer for both endpoints
+    headers.authorization = `Bearer ${apiKey}`;
     if (dialect === 'anthropic') {
-      headers['x-api-key'] = apiKey;
       headers['anthropic-version'] = ANTHROPIC_VERSION;
-    } else {
-      headers.authorization = `Bearer ${apiKey}`;
     }
     const body =
       dialect === 'anthropic'
@@ -234,8 +251,16 @@ export class MiniMaxClientAdapter implements MiniMaxClient {
       body,
       signal,
     });
+    // For error responses, read the body immediately before it's consumed elsewhere
     if (!response.ok) {
-      return response;
+      // Read the error body now so we can log it
+      const errorText = await response.text().catch(() => '');
+      // Create a new Response with the error text so callers can still access it
+      return new Response(errorText, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
     }
     if (!response.body) {
       throw new MiniMaxClientError('network', 'MiniMax response has no body');
@@ -266,7 +291,10 @@ function serializeOpenAiRequest(request: MiniMaxCompletionRequest): OpenAiReques
   };
   if (request.tools !== undefined) out.tools = request.tools;
   if (request.toolChoice !== undefined) out.tool_choice = request.toolChoice;
-  if (request.temperature !== undefined) out.temperature = request.temperature;
+  if (request.temperature !== undefined) {
+    // MiniMax OpenAI API requires temperature in [0, 2]
+    out.temperature = Math.max(0, Math.min(2, request.temperature));
+  }
   if (request.maxTokens !== undefined) out.max_tokens = request.maxTokens;
   return out;
 }
@@ -293,11 +321,39 @@ interface AnthropicRequest {
 function serializeAnthropicRequest(request: MiniMaxCompletionRequest): AnthropicRequest {
   const systemParts: string[] = [];
   const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = [];
+  let hasSeenUserMessage = false;
+
   for (const m of request.messages) {
     if (m.role === 'system') {
       const text = typeof m.content === 'string' ? m.content : extractTextFromParts(m.content);
       if (text.length > 0) systemParts.push(text);
       continue;
+    }
+    // Anthropic API requires messages array to start with a user message.
+    // Convert assistant text before the first user message to system messages,
+    // but preserve tool_use blocks since tool_results reference them by ID.
+    if (m.role === 'assistant' && !hasSeenUserMessage) {
+      const text = typeof m.content === 'string' ? m.content : extractTextFromParts(m.content);
+      if (text.length > 0) systemParts.push(text);
+      // If there are tool calls, we can't just drop them - insert a synthetic user message first
+      if (m.toolCalls && m.toolCalls.length > 0) {
+        hasSeenUserMessage = true;
+        messages.push({ role: 'user', content: 'Continue.' });
+        const content: unknown[] = [];
+        for (const call of m.toolCalls) {
+          content.push({
+            type: 'tool_use',
+            id: call.id,
+            name: call.function.name,
+            input: safeParseJson(call.function.arguments),
+          });
+        }
+        messages.push({ role: 'assistant', content });
+      }
+      continue;
+    }
+    if (m.role === 'user') {
+      hasSeenUserMessage = true;
     }
     if (m.role === 'tool') {
       messages.push({
@@ -329,7 +385,10 @@ function serializeAnthropicRequest(request: MiniMaxCompletionRequest): Anthropic
           });
         }
       }
-      messages.push({ role: 'assistant', content });
+      // Only push if we have content (text or tool_use blocks)
+      if (content.length > 0) {
+        messages.push({ role: 'assistant', content });
+      }
       continue;
     }
     if (typeof m.content === 'string') {
@@ -349,9 +408,30 @@ function serializeAnthropicRequest(request: MiniMaxCompletionRequest): Anthropic
     max_tokens: request.maxTokens ?? 4_096,
   };
   if (systemParts.length > 0) out.system = systemParts.join('\n');
-  if (request.tools !== undefined) out.tools = request.tools;
-  if (request.toolChoice !== undefined) out.tool_choice = request.toolChoice;
-  if (request.temperature !== undefined) out.temperature = request.temperature;
+  if (request.tools !== undefined && request.tools.length > 0) {
+    // Convert OpenAI-format tools to Anthropic format
+    out.tools = request.tools.map((t) => ({
+      name: t.function.name,
+      description: t.function.description,
+      input_schema: t.function.parameters ?? { type: 'object', properties: {} },
+    }));
+  }
+  if (request.toolChoice !== undefined) {
+    // Convert OpenAI-style tool_choice to Anthropic format
+    if (request.toolChoice === 'auto') {
+      out.tool_choice = { type: 'auto' };
+    } else if (request.toolChoice === 'required') {
+      out.tool_choice = { type: 'any' };
+    } else if (request.toolChoice === 'none') {
+      // Anthropic doesn't have 'none' - just don't send tools
+    } else if (typeof request.toolChoice === 'object' && request.toolChoice.function?.name) {
+      out.tool_choice = { type: 'tool', name: request.toolChoice.function.name };
+    }
+  }
+  if (request.temperature !== undefined) {
+    // MiniMax Anthropic API requires temperature in [0, 2]
+    out.temperature = Math.max(0, Math.min(2, request.temperature));
+  }
   return out;
 }
 
@@ -804,7 +884,6 @@ function normalizeAnthropicStopReason(reason: string): FinishReason {
 
 function defaultDialectFor(_model: string): MiniMaxDialect {
   // VSCode is deprecating the OpenAI-compatible method; use Anthropic for all models.
-  // See: https://platform.minimax.io/docs/token-plan/other-tools#anthropic-compatible-protocol
   return 'anthropic';
 }
 

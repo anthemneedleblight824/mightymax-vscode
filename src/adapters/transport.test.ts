@@ -602,13 +602,13 @@ describe('MiniMaxClientAdapter — Anthropic dialect', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('MiniMaxClientAdapter — endpoint routing', () => {
-  it('routes M3 to the Anthropic /v1/messages endpoint with x-api-key', async () => {
+  it('routes M3 to the Anthropic /v1/messages endpoint with Authorization: Bearer', async () => {
     let receivedPath = '';
-    let receivedXApiKey = '';
+    let receivedAuth = '';
     const server = await startMockServer((req, res) => {
       receivedPath = req.url ?? '';
-      const x = req.headers['x-api-key'];
-      receivedXApiKey = Array.isArray(x) ? (x[0] ?? '') : (x ?? '');
+      const a = req.headers['authorization'];
+      receivedAuth = Array.isArray(a) ? (a[0] ?? '') : (a ?? '');
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.end(
         serializeSse([
@@ -631,8 +631,11 @@ describe('MiniMaxClientAdapter — endpoint routing', () => {
         makeRecordingLogger(),
       );
       ok(receivedPath.endsWith('/v1/messages'), `expected /v1/messages, got ${receivedPath}`);
-      // The Anthropic endpoint uses x-api-key, not Authorization: Bearer.
-      ok(receivedXApiKey.length > 0, 'expected x-api-key to be set');
+      // MiniMax uses Authorization: Bearer for both OpenAI and Anthropic endpoints.
+      ok(
+        receivedAuth === `Bearer ${TEST_API_KEY}`,
+        `expected 'Authorization: Bearer <key>', got ${receivedAuth}`,
+      );
     } finally {
       await server.close();
     }
@@ -640,11 +643,11 @@ describe('MiniMaxClientAdapter — endpoint routing', () => {
 
   it('routes M2 to the Anthropic /v1/messages endpoint (all models use Anthropic)', async () => {
     let receivedPath = '';
-    let receivedXApiKey = '';
+    let receivedAuth = '';
     const server = await startMockServer((req, res) => {
       receivedPath = req.url ?? '';
-      const x = req.headers['x-api-key'];
-      receivedXApiKey = Array.isArray(x) ? (x[0] ?? '') : (x ?? '');
+      const a = req.headers['authorization'];
+      receivedAuth = Array.isArray(a) ? (a[0] ?? '') : (a ?? '');
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.end(
         serializeSse([
@@ -662,7 +665,10 @@ describe('MiniMaxClientAdapter — endpoint routing', () => {
       const client = makeClient(() => server.url);
       await collectEvents(client, defaultRequest, neverAbort, makeRecordingLogger());
       ok(receivedPath.endsWith('/v1/messages'), `expected /v1/messages, got ${receivedPath}`);
-      ok(receivedXApiKey.length > 0, 'expected x-api-key to be set');
+      ok(
+        receivedAuth === `Bearer ${TEST_API_KEY}`,
+        `expected 'Authorization: Bearer <key>', got ${receivedAuth}`,
+      );
     } finally {
       await server.close();
     }
@@ -716,7 +722,10 @@ describe('MiniMaxClientAdapter — 429 backoff', () => {
           { event: 'message_start', data: JSON.stringify({ type: 'message_start' }) },
           {
             event: 'content_block_delta',
-            data: JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } }),
+            data: JSON.stringify({
+              type: 'content_block_delta',
+              delta: { type: 'text_delta', text: 'ok' },
+            }),
           },
           {
             event: 'message_delta',
