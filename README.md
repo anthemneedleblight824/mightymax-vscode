@@ -46,6 +46,22 @@ The API key never lives in settings — it is stored exclusively in
 `context.secrets` (SecretStorage) and entered through the
 `Mighty Max: Manage` command.
 
+### Utility model (commit messages, doc generation)
+
+MiniMax models can serve as VS Code's utility model for commit message
+generation, doc string generation, and other short-completion tasks.
+Set this in your VS Code settings:
+
+```json
+{
+  "chat.utilityModel": "minimax:MiniMax-M3"
+}
+```
+
+Replace `MiniMax-M3` with any MiniMax model (M1, M2, M2.5, M2.7, M3).
+Utility requests are short, tool-less completions optimized for
+quick, focused responses.
+
 ## Workspace trust posture
 
 | Capability           | Status                                         |
