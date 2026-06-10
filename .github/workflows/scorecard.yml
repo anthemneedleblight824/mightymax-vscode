@@ -33,8 +33,9 @@ jobs:
         with:
           results_file: results.sarif
           results_format: sarif
-          # Publish results for public repos to display OpenSSF badge
-          publish_results: true
+          # Disabled: scorecard service rejecting v2.4.3 SHA as "imposter commit"
+          # Can re-enable once service database is updated to recognize v2.4.3
+          publish_results: false
 
       - name: Upload SARIF artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
