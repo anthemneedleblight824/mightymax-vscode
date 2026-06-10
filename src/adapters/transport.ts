@@ -212,7 +212,7 @@ export class MiniMaxClientAdapter implements MiniMaxClient {
   ): Promise<Response> {
     const baseUrl = this.baseUrl().replace(/\/+$/, '');
     const url =
-      dialect === 'anthropic' ? `${baseUrl}/v1/messages` : `${baseUrl}/v1/chat/completions`;
+      dialect === 'anthropic' ? `${baseUrl}/anthropic/v1/messages` : `${baseUrl}/v1/chat/completions`;
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       accept: 'text/event-stream',
