@@ -106,10 +106,11 @@ export class ChatProvider implements vscode.LanguageModelChatProvider {
     // Convert vscode messages to domain format
     const domainMessages = messages.map(vscodeToDomainMessage);
 
-    // Get model info from catalog to determine dialect
+    // Get model info from catalog to determine thinking style
     const modelInfo = await this.catalog.getModel(model.id);
     const thinkingStyle: ThinkingStyle = modelInfo?.thinkingStyle ?? 'openai';
-    const dialect = thinkingStyle === 'anthropic' ? 'anthropic' : 'openai';
+    // VSCode is deprecating the OpenAI method; always use Anthropic dialect
+    const dialect = 'anthropic' as const;
 
     // Map messages to MiniMax wire format (model first, then messages)
     const mappingResult = mapRequestToMiniMax({ id: model.id, thinkingStyle }, domainMessages);

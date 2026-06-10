@@ -802,8 +802,10 @@ function normalizeAnthropicStopReason(reason: string): FinishReason {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function defaultDialectFor(model: string): MiniMaxDialect {
-  return model === 'MiniMax-M3' ? 'anthropic' : 'openai';
+function defaultDialectFor(_model: string): MiniMaxDialect {
+  // VSCode is deprecating the OpenAI-compatible method; use Anthropic for all models.
+  // See: https://platform.minimax.io/docs/token-plan/other-tools#anthropic-compatible-protocol
+  return 'anthropic';
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {

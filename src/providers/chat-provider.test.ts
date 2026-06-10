@@ -393,7 +393,7 @@ describe('ChatProvider.provideLanguageModelChatResponse', () => {
     strictEqual(toolWire?.content, '127.0.0.1 localhost');
   });
 
-  it('routes M2.x through the OpenAI dialect and M3 through Anthropic', async () => {
+  it('routes all models through the Anthropic dialect (VSCode prefers Anthropic)', async () => {
     const logger = makeRecordingLogger();
     const catalog = makeCatalog([M3, M2_5]);
     const client = makeFakeClient([[{ textDelta: 'ok' }], [{ textDelta: 'ok' }]]);
@@ -423,8 +423,9 @@ describe('ChatProvider.provideLanguageModelChatResponse', () => {
       new vscode.CancellationTokenSource().token,
     );
 
+    // Both M3 and M2.x now use Anthropic (VSCode is deprecating OpenAI)
     strictEqual(client.calls[0]?.request.dialect, 'anthropic');
-    strictEqual(client.calls[1]?.request.dialect, 'openai');
+    strictEqual(client.calls[1]?.request.dialect, 'anthropic');
   });
 
   it('maps toolMode=Required to tool_choice=required on the wire', async () => {
