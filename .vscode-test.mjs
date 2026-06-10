@@ -36,4 +36,17 @@ export default defineConfig([
       timeout: 30_000,
     },
   },
+  {
+    label: 'agent-harness',
+    // Agent-loop fidelity tests: multi-round conversations, parallel tool
+    // calls, malformed call recovery, cancellation. Runs with the VS Code
+    // host to test the full ChatProvider against scripted agent scenarios.
+    files: 'out/test/agent-harness.test.js',
+    version: 'insiders',
+    launchArgs: ['--disable-extensions', '--disable-updates'],
+    mocha: {
+      ui: 'bdd',
+      timeout: 30_000,
+    },
+  },
 ]);
