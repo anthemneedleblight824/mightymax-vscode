@@ -43,6 +43,19 @@ export class ChatProvider implements vscode.LanguageModelChatProvider {
 
   readonly onDidChangeLanguageModelChatInformation: vscode.Event<void> = this.changeEmitter.event;
 
+  /**
+   * Public hook used by the composition root (extension.ts) to
+   * re-fire the change event after the API key or base URL is
+   * mutated through the manage command. Mirrors
+   * `vscode.EventEmitter.fire` so callers don't need to reach into
+   * the private emitter.
+   *
+   * Implementation: T06.
+   */
+  fireChange(): void {
+    this.changeEmitter.fire();
+  }
+
   async provideLanguageModelChatInformation(
     options: vscode.PrepareLanguageModelChatModelOptions,
     token: vscode.CancellationToken,

@@ -4,12 +4,48 @@ import { SecretStoreAdapter } from './adapters/secret-store.js';
 import { MiniMaxClientAdapter } from './adapters/transport.js';
 import { CatalogAdapter } from './adapters/catalog.js';
 import { ChatProvider } from './providers/chat-provider.js';
+import { runManageCommand, type ManageUi } from './commands/manage-command.js';
 import type { Logger } from './ports/logger.js';
 
 const LOG_LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error'];
 
 function isLogLevel(value: unknown): value is LogLevel {
   return typeof value === 'string' && (LOG_LEVELS as readonly string[]).includes(value);
+}
+
+/**
+ * Build the small `ManageUi` adapter that maps the manage-command's
+ * dependency-injected UI surface onto the real `vscode.window` calls.
+ */
+function createVsCodeUi(): ManageUi {
+  return {
+    showQuickPick: async (items, options) => {
+      const vscodeItems: vscode.QuickPickItem[] = items.map((item) => ({
+        label: item.label,
+        ...(item.description !== undefined ? { description: item.description } : {}),
+      }));
+      const choice = await vscode.window.showQuickPick<vscode.QuickPickItem>(
+        vscodeItems,
+        options?.title !== undefined ? { title: options.title } : {},
+      );
+      if (!choice) return undefined;
+      const matched = items.find((i) => i.label === choice.label);
+      return matched;
+    },
+    showInputBox: (options) =>
+      Promise.resolve(
+        vscode.window.showInputBox({
+          ...(options?.prompt !== undefined ? { prompt: options.prompt } : {}),
+          ...(options?.password !== undefined ? { password: options.password } : {}),
+          ...(options?.value !== undefined ? { value: options.value } : {}),
+          ...(options?.ignoreFocusOut !== undefined
+            ? { ignoreFocusOut: options.ignoreFocusOut }
+            : {}),
+        }),
+      ),
+    showInfoMessage: (message) => Promise.resolve(vscode.window.showInformationMessage(message)),
+    showErrorMessage: (message) => Promise.resolve(vscode.window.showErrorMessage(message)),
+  };
 }
 
 /**
@@ -36,13 +72,39 @@ export function activate(context: vscode.ExtensionContext): void {
   const catalog = new CatalogAdapter(logger);
   const chatProvider = new ChatProvider(logger, secretStore, client, catalog);
 
+  // T06 — when the user clears (or another extension overwrites) the
+  // stored API key, the picker should refresh so the model family
+  // disappears. `onDidChange` fires after every store/delete; we don't
+  // get the key value (and don't want it) — just the event.
+  const secretsListener = context.secrets.onDidChange((event) => {
+    // `event.key` may be undefined (mass change) or the namespaced key.
+    // We only care about our own key, but checking requires a substring
+    // match on the namespace prefix.
+    if (event.key !== undefined && !event.key.startsWith('mightyMax.')) {
+      return;
+    }
+    logger.info('Mighty Max: secret storage change detected — refreshing chat information');
+    chatProvider.fireChange();
+  });
+  context.subscriptions.push(secretsListener);
+
   context.subscriptions.push(
     vscode.lm.registerLanguageModelChatProvider('minimax', chatProvider),
     vscode.commands.registerCommand('mightyMax.manage', () => {
       logger.info('Mighty Max management command invoked');
-      // TODO(T06): open the management QuickPick that reads/writes the
-      // SecretStoreAdapter. The UI will prompt for the API key, validate it
-      // against the MiniMax /models endpoint, and store it on success.
+      const ui = createVsCodeUi();
+      const configProvider = () => vscode.workspace.getConfiguration('mightyMax');
+      return runManageCommand({
+        logger,
+        secretStore,
+        baseUrl: baseUrl(),
+        ui,
+        fireChange: () => chatProvider.fireChange(),
+        getConfig: () => ({
+          get: (key) => configProvider().get(key),
+          update: (key, value) => Promise.resolve(configProvider().update(key, value)),
+        }),
+      });
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('mightyMax.logLevel')) {

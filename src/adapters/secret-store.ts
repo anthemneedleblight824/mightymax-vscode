@@ -7,26 +7,34 @@ import type { SecretStore } from '../ports/secret-store.js';
  * Implements the `SecretStore` port over the host's SecretStorage. The
  * API key never touches a setting, log channel, or any other surface.
  *
- * Implementation: T06. This file exists so the composition root can
- * wire a real-looking adapter at activation; every method throws to
- * make accidental use during T01 impossible to miss.
+ * Keys are namespaced with the `mightyMax.` prefix to avoid collisions
+ * with other extensions reading from the same SecretStorage.
+ *
+ * `vscode.SecretStorage` returns Thenables (not Promises). We wrap each
+ * call in `Promise.resolve` so the port contract (`Promise<...>`) holds
+ * and downstream code can rely on `await` + `.catch` ergonomics.
+ *
+ * Implementation: T06.
  */
+const NAMESPACE = 'mightyMax.';
+
 export class SecretStoreAdapter implements SecretStore {
-  constructor(_secrets: vscode.SecretStorage) {}
+  constructor(private readonly secrets: vscode.SecretStorage) {}
 
-  getSecret(_name: string): Promise<string | undefined> {
-    throw new Error('SecretStoreAdapter.getSecret not implemented (see T06)');
+  getSecret(name: string): Promise<string | undefined> {
+    return Promise.resolve(this.secrets.get(NAMESPACE + name));
   }
 
-  storeSecret(_name: string, _value: string): Promise<void> {
-    throw new Error('SecretStoreAdapter.storeSecret not implemented (see T06)');
+  storeSecret(name: string, value: string): Promise<void> {
+    return Promise.resolve(this.secrets.store(NAMESPACE + name, value));
   }
 
-  deleteSecret(_name: string): Promise<void> {
-    throw new Error('SecretStoreAdapter.deleteSecret not implemented (see T06)');
+  deleteSecret(name: string): Promise<void> {
+    return Promise.resolve(this.secrets.delete(NAMESPACE + name));
   }
 
-  hasSecret(_name: string): Promise<boolean> {
-    throw new Error('SecretStoreAdapter.hasSecret not implemented (see T06)');
+  async hasSecret(name: string): Promise<boolean> {
+    const value = await this.secrets.get(NAMESPACE + name);
+    return value !== undefined;
   }
 }

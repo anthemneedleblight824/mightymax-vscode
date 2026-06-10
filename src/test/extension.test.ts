@@ -114,3 +114,23 @@ suite('Language model catalog (T02)', () => {
     );
   });
 });
+
+suite('API key lifecycle (T06)', () => {
+  test('mightyMax.manage command is registered and discoverable', async () => {
+    const commands = await vscode.commands.getCommands(true);
+    assert.ok(commands.includes('mightyMax.manage'), 'mightyMax.manage must be registered');
+  });
+
+  test('mightyMax.manage runs without throwing (UI is user-driven)', async () => {
+    // The command is interactive (shows a QuickPick). We don't drive the
+    // UI in the test host; we just verify the command body is wired and
+    // returns gracefully even when the user dismisses the picker. We
+    // exercise this by passing a CancellationError-style resolve by NOT
+    // simulating any input — VS Code will return undefined immediately
+    // for showQuickPick when the test host has no real input source.
+    await assert.doesNotReject(async () => {
+      // vscode.commands.executeCommand returns Thenable; await it.
+      await vscode.commands.executeCommand('mightyMax.manage');
+    }, 'mightyMax.manage should not throw when invoked');
+  });
+});
