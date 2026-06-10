@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/img/mighty_max_logo_readme.png" alt="Mighty Max Logo" width="256" />
+  <img src="assets/img/mighty_max_logo.png" alt="Mighty Max Logo" width="350" />
 </div>
 
 # Mighty Max
@@ -87,6 +87,7 @@ code --install-extension mighty-max.vsix
 ### 4. Start Chatting
 
 Use any Chat feature:
+
 - **Ask** — Type questions in the Chat panel
 - **Edit** — Select code, right-click → "Edit with Chat"
 - **Inline Chat** — Press Ctrl+I / Cmd+I in the editor
@@ -123,19 +124,19 @@ quick, focused responses.
 
 Mighty Max covers every BYOK-supported surface in VS Code Chat:
 
-| Feature                  | Status      | Notes                                                                 |
-| ------------------------ | ----------- | --------------------------------------------------------------------- |
-| Chat: Ask                | ✅ Supported | Standard chat mode in the Chat panel                                  |
-| Chat: Edit               | ✅ Supported | Edit mode with diff previews                                          |
-| Chat: Inline             | ✅ Supported | Inline chat in the editor (Ctrl+I)                                    |
-| Agent mode               | ✅ Supported | Full agentic tool calling with built-in, extension, and MCP tools    |
-| Custom/local agents      | ✅ Supported | User-authored agent definitions work with MiniMax models             |
-| Utility tasks            | ✅ Supported | Commit messages, doc generation via `chat.utilityModel` setting      |
-| Tool calling             | ✅ Supported | Built-in (apply-edit, run-in-terminal), extension tools, MCP servers  |
-| Image input              | ✅ Supported | M3, M2.7, M2.5, M2 accept images via data URIs                       |
-| Thinking blocks          | ✅ Supported | M3 surfaces native Anthropic-style thinking; M2.x surfaces reasoning  |
-| Multi-round agent loops  | ✅ Supported | Tool results fed back across many rounds without dropping calls      |
-| Token usage tracking     | ✅ Supported | Accurate context-window widget via prompt + completion token counts  |
+| Feature                 | Status       | Notes                                                                |
+| ----------------------- | ------------ | -------------------------------------------------------------------- |
+| Chat: Ask               | ✅ Supported | Standard chat mode in the Chat panel                                 |
+| Chat: Edit              | ✅ Supported | Edit mode with diff previews                                         |
+| Chat: Inline            | ✅ Supported | Inline chat in the editor (Ctrl+I)                                   |
+| Agent mode              | ✅ Supported | Full agentic tool calling with built-in, extension, and MCP tools    |
+| Custom/local agents     | ✅ Supported | User-authored agent definitions work with MiniMax models             |
+| Utility tasks           | ✅ Supported | Commit messages, doc generation via `chat.utilityModel` setting      |
+| Tool calling            | ✅ Supported | Built-in (apply-edit, run-in-terminal), extension tools, MCP servers |
+| Image input             | ✅ Supported | M3, M2.7, M2.5, M2 accept images via data URIs                       |
+| Thinking blocks         | ✅ Supported | M3 surfaces native Anthropic-style thinking; M2.x surfaces reasoning |
+| Multi-round agent loops | ✅ Supported | Tool results fed back across many rounds without dropping calls      |
+| Token usage tracking    | ✅ Supported | Accurate context-window widget via prompt + completion token counts  |
 
 ## What Mighty Max does NOT provide
 
