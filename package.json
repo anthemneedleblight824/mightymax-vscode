@@ -2,7 +2,7 @@
   "name": "mighty-max",
   "displayName": "Mighty Max",
   "description": "MiniMax M-series language models for VS Code Chat (BYOK)",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "publisher": "greysquirr3l",
   "license": "MIT",
   "icon": "assets/img/mighty_max_head.png",
@@ -72,6 +72,52 @@
           ],
           "default": "info",
           "description": "Log level for Mighty Max. Logs never contain the API key, Authorization header, or request/response bodies.",
+          "scope": "window"
+        },
+        "mightyMax.enableSmartToolFiltering": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable smart tool filtering to work around M3's limitations with large tool sets (80+ tools). When enabled, only the most relevant tools are sent to the model based on your prompt and usage history.",
+          "scope": "window"
+        },
+        "mightyMax.maxTools": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "maximum": 100,
+          "description": "Maximum number of tools to send to the model when smart filtering is enabled. M3 works best with 20-40 tools. Set higher if you have a small tool set or want to disable the limit.",
+          "scope": "window"
+        },
+        "mightyMax.alwaysIncludeTools": {
+          "type": "array",
+          "default": [
+            "read_file",
+            "write_file",
+            "edit_file",
+            "bash",
+            "grep",
+            "glob"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Tool names that should always be included regardless of relevance scoring. Common file and code operations are included by default.",
+          "scope": "window"
+        },
+        "mightyMax.toolFilterStrategy": {
+          "type": "string",
+          "enum": [
+            "relevance",
+            "usage",
+            "hybrid"
+          ],
+          "default": "hybrid",
+          "enumDescriptions": [
+            "Filter based on semantic relevance to the current prompt (keyword matching)",
+            "Filter based on historical usage patterns (frequently-used tools prioritized)",
+            "Combine relevance and usage scoring for balanced filtering"
+          ],
+          "description": "Strategy for selecting which tools to include when filtering is enabled.",
           "scope": "window"
         }
       }

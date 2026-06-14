@@ -210,12 +210,29 @@ export function mapRequestToMiniMax(
     const richParts: MiniMaxWireContentPart[] = [];
     const toolResults: Array<{ callId: string; content: string }> = [];
     const toolCalls: Array<{ id: string; name: string; arguments: string }> = [];
+    const thinkingParts: Array<{ thinking: string; signature?: string }> = [];
     let sawAnyPart = false;
 
     for (const part of msg.content) {
       sawAnyPart = true;
       if (part.type === 'text') {
         textParts.push(part.value);
+        continue;
+      }
+      if (part.type === 'thinking') {
+        // Accumulate thinking parts to prepend to assistant messages
+        // (M3 Anthropic requirement: thinking must precede text/tool_use)
+        if (msg.role === 'assistant') {
+          const thinkingPart: { thinking: string; signature?: string } = { thinking: part.value };
+          if (part.signature) thinkingPart.signature = part.signature;
+          thinkingParts.push(thinkingPart);
+        } else {
+          // Thinking in user messages is ignored (shouldn't happen in practice)
+          warnings.push({
+            kind: 'unsupported-content',
+            reason: 'thinking part in user message (only assistant messages can have thinking)',
+          });
+        }
         continue;
       }
       if (part.type === 'image') {
@@ -301,13 +318,34 @@ export function mapRequestToMiniMax(
       continue;
     }
 
-    if (textParts.length > 0 || richParts.length > 0 || toolCalls.length > 0) {
+    if (
+      textParts.length > 0 ||
+      richParts.length > 0 ||
+      toolCalls.length > 0 ||
+      thinkingParts.length > 0
+    ) {
       const hasImages = richParts.length > 0;
       const hasText = textParts.length > 0;
       const hasToolCalls = toolCalls.length > 0;
+      const hasThinking = thinkingParts.length > 0;
+
       let content: string | ReadonlyArray<MiniMaxWireContentPart>;
-      if (hasImages) {
+      if (hasImages || hasThinking) {
+        // Use content array for images or thinking (Anthropic requires
+        // thinking blocks to be separate content parts)
         const parts: MiniMaxWireContentPart[] = [];
+        // Thinking must come first in Anthropic format
+        for (const tp of thinkingParts) {
+          const thinkingPart: MiniMaxWireContentPart = {
+            type: 'thinking',
+            thinking: tp.thinking,
+          };
+          if (tp.signature) {
+            (thinkingPart as { type: 'thinking'; thinking: string; signature?: string }).signature =
+              tp.signature;
+          }
+          parts.push(thinkingPart);
+        }
         if (hasText) {
           parts.push({ type: 'text', text: textParts.join('\n') });
         }
@@ -316,6 +354,7 @@ export function mapRequestToMiniMax(
       } else {
         content = textParts.join('\n');
       }
+
       const wireMsg: MiniMaxWireMessage = { role: msg.role, content };
       if (hasToolCalls && msg.role === 'assistant') {
         wireMsg.toolCalls = toolCalls.map((tc) => ({
@@ -351,8 +390,9 @@ export function mapRequestToMiniMax(
   // dropped result so the chat-provider can log it at warn
   // level. The turn continues with the surviving messages.
   const reconciled: MiniMaxWireMessage[] = [];
+  const shouldReconcileToolResults = assistantToolCallIds.size > 0;
   for (const m of wireMessages) {
-    if (m.role === 'tool') {
+    if (m.role === 'tool' && shouldReconcileToolResults) {
       const callId = m.toolCallId ?? '';
       if (callId.length === 0 || !assistantToolCallIds.has(callId)) {
         warnings.push({
@@ -417,12 +457,10 @@ export function mapStreamDeltaToResponseParts(
   //    blocks (M3). Strip them and surface as thinking parts.
   if (delta.textDelta !== undefined && delta.textDelta.length > 0) {
     if (thinkingStyle === 'anthropic') {
-      const { thinking, visible } = extractAnthropicThinking(delta.textDelta);
-      if (thinking.length > 0) {
-        parts.push({ type: 'thinking', value: thinking });
-      }
-      if (visible.length > 0) {
-        parts.push({ type: 'text', value: visible });
+      const extracted = extractAnthropicThinking(delta.textDelta);
+      for (const part of extracted.parts) {
+        if (part.value.length === 0) continue;
+        parts.push(part.type === 'thinking' ? { type: 'thinking', value: part.value } : part);
       }
     } else {
       parts.push({ type: 'text', value: delta.textDelta });
@@ -437,9 +475,18 @@ export function mapStreamDeltaToResponseParts(
 
   // 3. M3 Anthropic thinking content block (after the transport
   //    splits the Anthropic stream into per-block deltas) — same
-  //    treatment as reasoning content.
+  //    treatment as reasoning content. Preserve the signature if
+  //    present so it can be replayed in the next request.
   if (delta.thinkingDelta !== undefined && delta.thinkingDelta.length > 0) {
-    parts.push({ type: 'thinking', value: delta.thinkingDelta });
+    const thinkingPart: ChatResponsePart = {
+      type: 'thinking',
+      value: delta.thinkingDelta,
+    };
+    if (delta.thinkingSignature) {
+      (thinkingPart as { type: 'thinking'; value: string; signature?: string }).signature =
+        delta.thinkingSignature;
+    }
+    parts.push(thinkingPart);
   }
 
   // 4. Usage data — normalize and emit as a usage response part.
@@ -459,16 +506,33 @@ export function mapStreamDeltaToResponseParts(
  * thinking content.
  */
 function extractAnthropicThinking(text: string): {
-  readonly thinking: string;
-  readonly visible: string;
+  readonly parts: ReadonlyArray<{ readonly type: 'thinking' | 'text'; readonly value: string }>;
 } {
   const pattern = /\[?<anthropic_thinking>([\s\S]*?)<\/anthropic_thinking>\]?/g;
-  const thinkingParts: string[] = [];
-  const visible = text.replace(pattern, (_match, content: string) => {
-    thinkingParts.push(content);
-    return '';
-  });
-  return { thinking: thinkingParts.join(''), visible };
+  const parts: Array<{ readonly type: 'thinking' | 'text'; readonly value: string }> = [];
+  let cursor = 0;
+
+  for (const match of text.matchAll(pattern)) {
+    const full = match[0];
+    const content = match[1];
+    const start = match.index ?? -1;
+    if (start < 0 || full === undefined || content === undefined) continue;
+    if (start > cursor) {
+      parts.push({ type: 'text', value: text.slice(cursor, start) });
+    }
+    parts.push({ type: 'thinking', value: content });
+    cursor = start + full.length;
+  }
+
+  if (cursor < text.length) {
+    parts.push({ type: 'text', value: text.slice(cursor) });
+  }
+
+  if (parts.length === 0) {
+    parts.push({ type: 'text', value: text });
+  }
+
+  return { parts };
 }
 
 /**
@@ -483,12 +547,19 @@ export function mapMiniMaxUsage(usage: {
   readonly cacheReadTokens?: number;
   readonly cacheCreateTokens?: number;
 }): ChatUsageData {
+  const finiteNumber = (value: number | undefined): number | undefined =>
+    typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+
   const out: {
     -readonly [K in keyof ChatUsageData]: ChatUsageData[K];
   } = {};
-  if (usage.promptTokens !== undefined) out.promptTokens = usage.promptTokens;
-  if (usage.completionTokens !== undefined) out.completionTokens = usage.completionTokens;
-  if (usage.cacheReadTokens !== undefined) out.cacheReadTokens = usage.cacheReadTokens;
-  if (usage.cacheCreateTokens !== undefined) out.cacheCreateTokens = usage.cacheCreateTokens;
+  const promptTokens = finiteNumber(usage.promptTokens);
+  const completionTokens = finiteNumber(usage.completionTokens);
+  const cacheReadTokens = finiteNumber(usage.cacheReadTokens);
+  const cacheCreateTokens = finiteNumber(usage.cacheCreateTokens);
+  if (promptTokens !== undefined) out.promptTokens = promptTokens;
+  if (completionTokens !== undefined) out.completionTokens = completionTokens;
+  if (cacheReadTokens !== undefined) out.cacheReadTokens = cacheReadTokens;
+  if (cacheCreateTokens !== undefined) out.cacheCreateTokens = cacheCreateTokens;
   return out;
 }

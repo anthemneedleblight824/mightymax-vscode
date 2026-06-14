@@ -254,6 +254,13 @@ interface MutableParseState {
    * instance. The map's lifetime is the request's lifetime.
    */
   pendingToolUseStarts: Map<number, { id?: string; name?: string }>;
+  /**
+   * Pending thinking fragment (M3 Anthropic). The transport emits
+   * one `thinkingDelta` per `thinking_delta`, but keeps the most
+   * recent fragment pending long enough to attach a later
+   * `signature_delta` or sibling `signature` field before flushing it.
+   */
+  pendingThinking: { thinking: string; signature?: string } | undefined;
 }
 
 export class MiniMaxClientAdapter implements MiniMaxClient {
@@ -337,6 +344,7 @@ export class MiniMaxClientAdapter implements MiniMaxClient {
       lastCacheReadTokens: undefined,
       lastCacheCreateTokens: undefined,
       pendingToolUseStarts: new Map(),
+      pendingThinking: undefined,
     };
     // The abandonment check is stashed in this local rather than
     // thrown directly inside the `finally` block: the
@@ -410,7 +418,7 @@ export class MiniMaxClientAdapter implements MiniMaxClient {
             'MiniMax stream ended without delivering any events',
             { retriable: true },
           );
-        } else if (elapsedMs > this.abandonmentThresholdMs) {
+        } else if (elapsedMs >= this.abandonmentThresholdMs) {
           abandonmentError = new MiniMaxClientError(
             'abandoned',
             `MiniMax stream ended after ${elapsedMs}ms without a finish marker — the model's tool loop was likely interrupted`,
@@ -509,7 +517,8 @@ export class MiniMaxClientAdapter implements MiniMaxClient {
             logger.error(`MiniMax ${status} Server Error - Response: ${errorBody}`);
           }
           // Retry transient 5xx errors (500, 502, 503, 504) and 529 (overloaded)
-          const isRetriable = status === 500 || status === 502 || status === 503 || status === 504 || status === 529;
+          const isRetriable =
+            status === 500 || status === 502 || status === 503 || status === 504 || status === 529;
           if (isRetriable && attempt < maxAttempts) {
             const waitMs = computeBackoff({
               attempt,
@@ -673,7 +682,33 @@ function serializeAnthropicRequest(request: MiniMaxCompletionRequest): Anthropic
   const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = [];
   let hasSeenUserMessage = false;
 
-  for (const m of request.messages) {
+  // Coalesce consecutive tool results into a single user message
+  const coalescedMessages: MiniMaxWireMessage[] = [];
+  for (let i = 0; i < request.messages.length; i++) {
+    const m = request.messages[i];
+    if (m === undefined) continue;
+
+    if (m.role === 'tool') {
+      // Collect all consecutive tool messages
+      const toolResults: MiniMaxWireMessage[] = [m];
+      while (i + 1 < request.messages.length && request.messages[i + 1]?.role === 'tool') {
+        i++;
+        const nextTool = request.messages[i];
+        if (nextTool !== undefined) toolResults.push(nextTool);
+      }
+      // Create a synthetic "tool-batch" marker message
+      coalescedMessages.push({
+        role: 'user',
+        content: '',
+        toolCallId: '__batch__',
+        _toolBatch: toolResults as unknown as ReadonlyArray<MiniMaxWireMessage>,
+      } as MiniMaxWireMessage & { _toolBatch: ReadonlyArray<MiniMaxWireMessage> });
+    } else {
+      coalescedMessages.push(m);
+    }
+  }
+
+  for (const m of coalescedMessages) {
     if (m.role === 'system') {
       const text = typeof m.content === 'string' ? m.content : extractTextFromParts(m.content);
       if (text.length > 0) systemParts.push(text);
@@ -704,8 +739,28 @@ function serializeAnthropicRequest(request: MiniMaxCompletionRequest): Anthropic
     }
     if (m.role === 'user') {
       hasSeenUserMessage = true;
+      // Handle batched tool results
+      const batch = (m as MiniMaxWireMessage & { _toolBatch?: ReadonlyArray<MiniMaxWireMessage> })
+        ._toolBatch;
+      if (batch) {
+        // Create a single user message with all tool_result blocks
+        const toolResultBlocks: unknown[] = [];
+        for (const toolMsg of batch) {
+          toolResultBlocks.push({
+            type: 'tool_result',
+            tool_use_id: toolMsg.toolCallId,
+            content:
+              typeof toolMsg.content === 'string'
+                ? toolMsg.content
+                : extractTextFromParts(toolMsg.content),
+          });
+        }
+        messages.push({ role: 'user', content: toolResultBlocks });
+        continue;
+      }
     }
     if (m.role === 'tool') {
+      // Should not reach here after coalescing, but handle it defensively
       messages.push({
         role: 'user',
         content: [
@@ -788,6 +843,14 @@ function serializeAnthropicRequest(request: MiniMaxCompletionRequest): Anthropic
 function convertAnthropicContentPart(part: MiniMaxWireContentPart): unknown {
   if (part.type === 'text') {
     return { type: 'text', text: part.text };
+  }
+  if (part.type === 'thinking') {
+    const block: { type: 'thinking'; thinking: string; signature?: string } = {
+      type: 'thinking',
+      thinking: part.thinking,
+    };
+    if (part.signature) block.signature = part.signature;
+    return block;
   }
   return {
     type: 'image',
@@ -1117,6 +1180,20 @@ async function* parseAnthropicStream(
   }
 }
 
+function flushPendingThinking(parseState: MutableParseState): MiniMaxStreamEvent | undefined {
+  if (!parseState.pendingThinking) return undefined;
+  if (parseState.pendingThinking.thinking.length === 0) {
+    parseState.pendingThinking = undefined;
+    return undefined;
+  }
+  const event: MiniMaxStreamEvent = { thinkingDelta: parseState.pendingThinking.thinking };
+  if (parseState.pendingThinking.signature) {
+    event.thinkingSignature = parseState.pendingThinking.signature;
+  }
+  parseState.pendingThinking = undefined;
+  return event;
+}
+
 function* anthropicEventToStreamEvents(
   parsed: unknown,
   parseState: MutableParseState,
@@ -1147,6 +1224,11 @@ function* anthropicEventToStreamEvents(
     if (!isObject(cb)) return;
     const blockType = (cb as { type?: unknown }).type;
     if (blockType === 'tool_use') {
+      // Flush any pending thinking before starting a tool block
+      const pendingThinking = flushPendingThinking(parseState);
+      if (pendingThinking) {
+        yield pendingThinking;
+      }
       const id = (cb as { id?: unknown }).id;
       const name = (cb as { name?: unknown }).name;
       const index = (parsed as { index?: unknown }).index;
@@ -1161,6 +1243,9 @@ function* anthropicEventToStreamEvents(
       if (typeof id === 'string') start.id = id;
       if (typeof name === 'string') start.name = name;
       parseState.pendingToolUseStarts.set(idx, start);
+    } else if (blockType === 'thinking') {
+      // Nothing to do until the first thinking/signature delta arrives.
+      parseState.pendingThinking = undefined;
     }
     return;
   }
@@ -1169,16 +1254,57 @@ function* anthropicEventToStreamEvents(
     if (!isObject(delta)) return;
     const deltaType = (delta as { type?: unknown }).type;
     if (deltaType === 'text_delta') {
+      // Flush any pending thinking before emitting text
+      const pendingThinking = flushPendingThinking(parseState);
+      if (pendingThinking) {
+        yield pendingThinking;
+      }
       const text = (delta as { text?: unknown }).text;
       if (typeof text === 'string' && text.length > 0) yield { textDelta: text };
       return;
     }
     if (deltaType === 'thinking_delta') {
+      let carriedSignature: string | undefined;
+      if (parseState.pendingThinking?.thinking.length === 0) {
+        carriedSignature = parseState.pendingThinking.signature;
+        parseState.pendingThinking = undefined;
+      } else {
+        const pendingThinking = flushPendingThinking(parseState);
+        if (pendingThinking) {
+          yield pendingThinking;
+        }
+      }
+
       const thinking = (delta as { thinking?: unknown }).thinking;
-      if (typeof thinking === 'string' && thinking.length > 0) yield { thinkingDelta: thinking };
+      const signature = (delta as { signature?: unknown }).signature;
+      if (typeof thinking === 'string' && thinking.length > 0) {
+        const nextPending: { thinking: string; signature?: string } = { thinking };
+        if (typeof signature === 'string') {
+          nextPending.signature = signature;
+        } else if (carriedSignature !== undefined) {
+          nextPending.signature = carriedSignature;
+        }
+        parseState.pendingThinking = nextPending;
+      }
+      return;
+    }
+    if (deltaType === 'signature_delta') {
+      const signature = (delta as { signature?: unknown }).signature;
+      if (typeof signature === 'string') {
+        if (!parseState.pendingThinking) {
+          parseState.pendingThinking = { thinking: '', signature };
+        } else {
+          parseState.pendingThinking.signature = signature;
+        }
+      }
       return;
     }
     if (deltaType === 'input_json_delta') {
+      // Flush any pending thinking before emitting tool call deltas
+      const pendingThinking = flushPendingThinking(parseState);
+      if (pendingThinking) {
+        yield pendingThinking;
+      }
       const partial = (delta as { partial_json?: unknown }).partial_json;
       const index = (parsed as { index?: unknown }).index;
       if (typeof partial === 'string') {
@@ -1208,6 +1334,11 @@ function* anthropicEventToStreamEvents(
     return;
   }
   if (type === 'content_block_stop') {
+    // Flush pending thinking when a content block ends
+    const pendingThinking = flushPendingThinking(parseState);
+    if (pendingThinking) {
+      yield pendingThinking;
+    }
     const index = (parsed as { index?: unknown }).index;
     if (typeof index === 'number') {
       // A block may end without ever receiving an input_json_delta

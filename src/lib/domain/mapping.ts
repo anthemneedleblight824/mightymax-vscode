@@ -38,6 +38,33 @@ export interface MappingValidationError {
 
 const KNOWN_PART_KINDS = new Set(['text', 'image', 'tool-call', 'tool-result', 'thinking']);
 
+function partCallId(part: RichChatPart): string | undefined {
+  if (typeof part.callId === 'string' && part.callId.length > 0) {
+    return part.callId;
+  }
+  const nestedToolCall = part.toolCall;
+  if (
+    typeof nestedToolCall === 'object' &&
+    nestedToolCall !== null &&
+    'callId' in nestedToolCall &&
+    typeof (nestedToolCall as { callId?: unknown }).callId === 'string' &&
+    (nestedToolCall as { callId: string }).callId.length > 0
+  ) {
+    return (nestedToolCall as { callId: string }).callId;
+  }
+  const nestedToolResult = part.toolResult;
+  if (
+    typeof nestedToolResult === 'object' &&
+    nestedToolResult !== null &&
+    'callId' in nestedToolResult &&
+    typeof (nestedToolResult as { callId?: unknown }).callId === 'string' &&
+    (nestedToolResult as { callId: string }).callId.length > 0
+  ) {
+    return (nestedToolResult as { callId: string }).callId;
+  }
+  return undefined;
+}
+
 /**
  * Validate a list of rich messages before they reach the transport.
  * Pure function. T04 will reuse this and tighten the checks.
@@ -58,6 +85,18 @@ export function validateMessages(
           code: 'unsupported-part',
           index,
           message: `Message ${index} has unsupported part kind: ${part.kind}`,
+        });
+        continue;
+      }
+
+      if (
+        (part.kind === 'tool-call' || part.kind === 'tool-result') &&
+        partCallId(part) === undefined
+      ) {
+        errors.push({
+          code: 'missing-tool-call-id',
+          index,
+          message: `Message ${index} has ${part.kind} content without a non-empty callId`,
         });
       }
     }

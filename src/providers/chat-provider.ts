@@ -40,6 +40,22 @@ import type { ThinkingStyle } from '../ports/model-catalog.js';
 export class ChatProvider implements vscode.LanguageModelChatProvider {
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   private disposables: vscode.Disposable[] = [];
+  /**
+   * Shadow cache of thinking blocks with signatures, keyed by a hash of
+   * the assistant message content that preceded them. This cache bridges
+   * the gap until LanguageModelThinkingPart lands in @types/vscode and
+   * VS Code can persist thinking blocks in its own history. The cache
+   * lifetime is the provider's lifetime (cleared on dispose).
+   *
+   * Key: hash of (text content + stringified tool calls) from the
+   * assistant message. Value: {thinking, signature?}.
+   */
+  private readonly thinkingCache = new Map<string, { thinking: string; signature?: string }>();
+  /**
+   * Tool usage tracking for smart filtering. Maps tool names to call counts.
+   * Used to prioritize frequently-used tools when filtering is enabled.
+   */
+  private readonly toolUsageStats = new Map<string, number>();
 
   constructor(
     private readonly logger: Logger,
@@ -122,6 +138,9 @@ export class ChatProvider implements vscode.LanguageModelChatProvider {
     // Convert vscode messages to domain format
     const domainMessages = messages.map(vscodeToDomainMessage);
 
+    // Inject cached thinking blocks into assistant messages
+    const enrichedMessages = this.enrichWithThinking(domainMessages);
+
     // Get model info from catalog to determine thinking style
     const modelInfo = await this.catalog.getModel(model.id);
     const thinkingStyle: ThinkingStyle = modelInfo?.thinkingStyle ?? 'openai';
@@ -129,7 +148,7 @@ export class ChatProvider implements vscode.LanguageModelChatProvider {
     const dialect = 'anthropic';
 
     // Map messages to MiniMax wire format (model first, then messages)
-    const mappingResult = mapRequestToMiniMax({ id: model.id, thinkingStyle }, domainMessages);
+    const mappingResult = mapRequestToMiniMax({ id: model.id, thinkingStyle }, enrichedMessages);
 
     // Log any mapping warnings
     for (const warning of mappingResult.warnings) {
@@ -138,8 +157,21 @@ export class ChatProvider implements vscode.LanguageModelChatProvider {
       }
     }
 
-    // Map tools to MiniMax format
-    const tools = options.tools?.map(vscodeToDomainTool) ?? [];
+    // Map tools to MiniMax format with smart filtering
+    const allTools = options.tools?.map(vscodeToDomainTool) ?? [];
+
+    // Extract user prompt for relevance scoring
+    const userPrompt = messages
+      .filter(m => m.role === vscode.LanguageModelChatMessageRole.User)
+      .map(m => {
+        const content = typeof m.content === 'string' ? m.content :
+          m.content.map(p => p instanceof vscode.LanguageModelTextPart ? p.value : '').join(' ');
+        return content;
+      })
+      .join(' ');
+
+    // Apply smart filtering if configured
+    const tools = this.filterTools(allTools, userPrompt);
     const miniMaxTools = tools.length > 0 ? mapToolsToMiniMax(tools) : undefined;
 
     // Convert vscode.LanguageModelChatToolMode to ChatToolMode
@@ -162,16 +194,24 @@ export class ChatProvider implements vscode.LanguageModelChatProvider {
       dialect,
     };
 
-    this.logger.debug('Starting streaming request', {
+    this.logger.info('Starting streaming request', {
       model: model.id,
       dialect,
       messageCount: request.messages.length,
       toolCount: tools.length,
+      toolMode,
+      tools: tools.map(t => t.name),
     });
 
     try {
       // Set up tool-call accumulator
       let accumulatorState = accumulatorSeed();
+      // Thinking accumulator for caching
+      let currentThinking: { thinking: string; signature?: string } | undefined;
+      // Text accumulator for cache key generation
+      let currentText = '';
+      // Tool call IDs accumulator for cache key generation
+      const currentToolCallIds: string[] = [];
 
       // Convert CancellationToken to AbortSignal
       const abortController = new AbortController();
@@ -208,11 +248,24 @@ export class ChatProvider implements vscode.LanguageModelChatProvider {
             }
 
             if (part.type === 'text') {
+              currentText += part.value;
+              this.logger.info('Text delta', { length: part.value.length, preview: part.value.substring(0, 100) });
               progress.report(toLanguageModelTextPart(part.value));
             } else if (part.type === 'thinking') {
-              // Thinking is reported as text until LanguageModelThinkingPart lands in @types/vscode
-              // The thinking content is not added to visible text
-              this.logger.debug('Thinking content', { length: part.value.length });
+              // Accumulate thinking content with signature for caching
+              if (!currentThinking) {
+                const accumulated: { thinking: string; signature?: string } = { thinking: part.value };
+                if (part.signature) accumulated.signature = part.signature;
+                currentThinking = accumulated;
+              } else {
+                currentThinking.thinking += part.value;
+                if (part.signature) currentThinking.signature = part.signature;
+              }
+              this.logger.info('Thinking content', {
+                length: part.value.length,
+                hasSignature: !!part.signature,
+                preview: part.value.substring(0, 100),
+              });
             } else if (part.type === 'usage') {
               // Encode usage as a text part with a marker prefix so the host can introspect it
               const usageJson = JSON.stringify(part.usage);
@@ -221,14 +274,30 @@ export class ChatProvider implements vscode.LanguageModelChatProvider {
           }
 
           // Handle finish reason
+          if (event.finishReason !== undefined) {
+            this.logger.info('Stream finished', {
+              finishReason: event.finishReason,
+              textLength: currentText.length,
+              thinkingLength: currentThinking?.thinking.length ?? 0,
+              toolCallCount: currentToolCallIds.length,
+            });
+          }
           if (event.finishReason === 'tool_calls') {
             // Finalize accumulated tool calls
             const finalized = finalizeAccumulator(accumulatorState);
+            this.logger.info('Finalizing tool calls', { count: finalized.length });
             for (const toolCallOrError of finalized) {
               if (isToolSchemaError(toolCallOrError)) {
                 this.logger.error('Tool call finalization error', toolCallOrError);
               } else {
+                this.logger.info('Emitting tool call', {
+                  callId: toolCallOrError.callId,
+                  name: toolCallOrError.name,
+                });
+                currentToolCallIds.push(toolCallOrError.callId);
                 progress.report(toLanguageModelToolCallPart(toolCallOrError));
+                // Track tool usage for smart filtering
+                this.recordToolUsage(toolCallOrError.name);
               }
             }
           }
@@ -241,6 +310,17 @@ export class ChatProvider implements vscode.LanguageModelChatProvider {
         }
       } finally {
         onCancel.dispose();
+      }
+
+      // Cache the thinking block if we captured one, keyed by message content hash
+      if (currentThinking && (currentText || currentToolCallIds.length > 0)) {
+        const cacheKey = this.generateMessageHash(currentText, currentToolCallIds);
+        this.thinkingCache.set(cacheKey, currentThinking);
+        this.logger.debug('Cached thinking block', {
+          cacheKey,
+          thinkingLength: currentThinking.thinking.length,
+          hasSignature: !!currentThinking.signature,
+        });
       }
 
       this.logger.debug('Streaming request completed', { model: model.id });
@@ -290,6 +370,207 @@ export class ChatProvider implements vscode.LanguageModelChatProvider {
   dispose(): void {
     for (const d of this.disposables.splice(0)) d.dispose();
     this.changeEmitter.dispose();
+    this.thinkingCache.clear();
+    this.toolUsageStats.clear();
+  }
+
+  /**
+   * Generate a stable hash for an assistant message based on tool call IDs.
+   * We use only tool call IDs (not text) because VS Code doesn't preserve
+   * assistant text in message history - it only stores tool calls. So when
+   * the message comes back in the next round, we only have the tool IDs to
+   * match on. Uniqueness comes from tool call IDs being UUIDs.
+   */
+  private generateMessageHash(_text: string, toolCallIds: string[]): string {
+    return toolCallIds.join(',');
+  }
+
+  /**
+   * Score a tool's relevance to the current prompt using keyword matching.
+   * Returns a score between 0 and 1, where higher scores indicate better relevance.
+   */
+  private scoreToolRelevance(prompt: string, tool: ChatTool): number {
+    const promptLower = prompt.toLowerCase();
+    const toolNameLower = tool.name.toLowerCase();
+    const toolDescLower = tool.description.toLowerCase();
+
+    let score = 0;
+
+    // Exact name match (highest weight)
+    if (promptLower.includes(toolNameLower)) {
+      score += 1.0;
+    }
+
+    // Name keyword overlap (partial matches)
+    const toolNameWords = toolNameLower.split(/[_\-\s]+/);
+    for (const word of toolNameWords) {
+      if (word.length > 2 && promptLower.includes(word)) {
+        score += 0.3;
+      }
+    }
+
+    // Description keyword overlap
+    const descWords = toolDescLower.split(/\s+/).filter(w => w.length > 4);
+    const promptWords = new Set(promptLower.split(/\s+/).filter(w => w.length > 4));
+    let descMatches = 0;
+    for (const word of descWords) {
+      if (promptWords.has(word)) {
+        descMatches++;
+      }
+    }
+    if (descWords.length > 0) {
+      score += (descMatches / descWords.length) * 0.5;
+    }
+
+    return Math.min(score, 1.0);
+  }
+
+  /**
+   * Filter tools based on configuration and relevance/usage scoring.
+   * Always includes priority tools from configuration.
+   */
+  private filterTools(
+    allTools: ReadonlyArray<ChatTool>,
+    userPrompt: string,
+  ): ReadonlyArray<ChatTool> {
+    const config = vscode.workspace.getConfiguration('mightyMax');
+    const enabled = config.get<boolean>('enableSmartToolFiltering', true);
+    const maxTools = config.get<number>('maxTools', 30);
+    const alwaysInclude = new Set(config.get<string[]>('alwaysIncludeTools', [
+      'read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob'
+    ]));
+    const strategy = config.get<'relevance' | 'usage' | 'hybrid'>('toolFilterStrategy', 'hybrid');
+
+    // If filtering is disabled or we're under the limit, return all tools
+    if (!enabled || allTools.length <= maxTools) {
+      return allTools;
+    }
+
+    this.logger.info('Smart tool filtering enabled', {
+      totalTools: allTools.length,
+      maxTools,
+      strategy,
+      alwaysIncludeCount: alwaysInclude.size,
+    });
+
+    // Separate priority tools from others
+    const priorityTools: ChatTool[] = [];
+    const otherTools: ChatTool[] = [];
+
+    for (const tool of allTools) {
+      if (alwaysInclude.has(tool.name)) {
+        priorityTools.push(tool);
+      } else {
+        otherTools.push(tool);
+      }
+    }
+
+    // Calculate remaining budget after priority tools
+    const remainingSlots = Math.max(0, maxTools - priorityTools.length);
+
+    if (remainingSlots === 0) {
+      this.logger.info('Tool filtering: using only priority tools', {
+        priorityCount: priorityTools.length,
+      });
+      return priorityTools;
+    }
+
+    // Score and sort other tools
+    const scoredTools = otherTools.map(tool => {
+      let score = 0;
+
+      // Relevance component
+      if (strategy === 'relevance' || strategy === 'hybrid') {
+        const relevanceScore = this.scoreToolRelevance(userPrompt, tool);
+        score += relevanceScore * (strategy === 'hybrid' ? 0.6 : 1.0);
+      }
+
+      // Usage component
+      if (strategy === 'usage' || strategy === 'hybrid') {
+        const usageCount = this.toolUsageStats.get(tool.name) ?? 0;
+        const maxUsage = Math.max(1, ...Array.from(this.toolUsageStats.values()));
+        const usageScore = usageCount / maxUsage;
+        score += usageScore * (strategy === 'hybrid' ? 0.4 : 1.0);
+      }
+
+      return { tool, score };
+    });
+
+    // Sort by score (descending) and take top N
+    scoredTools.sort((a, b) => b.score - a.score);
+    const selectedOthers = scoredTools.slice(0, remainingSlots).map(s => s.tool);
+
+    const filtered = [...priorityTools, ...selectedOthers];
+
+    this.logger.info('Tool filtering complete', {
+      originalCount: allTools.length,
+      filteredCount: filtered.length,
+      priorityCount: priorityTools.length,
+      selectedOthersCount: selectedOthers.length,
+      topScoredTools: scoredTools.slice(0, 5).map(s => ({
+        name: s.tool.name,
+        score: s.score.toFixed(3),
+      })),
+    });
+
+    return filtered;
+  }
+
+  /**
+   * Track tool usage for smart filtering prioritization.
+   */
+  private recordToolUsage(toolName: string): void {
+    const current = this.toolUsageStats.get(toolName) ?? 0;
+    this.toolUsageStats.set(toolName, current + 1);
+  }
+
+  /**
+   * Retrieve cached thinking block for an assistant message. Returns
+   * undefined if no thinking was cached for this message.
+   */
+  private getCachedThinking(
+    text: string,
+    toolCallIds: string[],
+  ): { thinking: string; signature?: string } | undefined {
+    const key = this.generateMessageHash(text, toolCallIds);
+    return this.thinkingCache.get(key);
+  }
+
+  /**
+   * Enrich assistant messages with their cached thinking blocks.
+   * This bridges the gap until VS Code can persist thinking blocks
+   * in its own history via LanguageModelThinkingPart.
+   */
+  private enrichWithThinking(messages: ReadonlyArray<ChatMessage>): ReadonlyArray<ChatMessage> {
+    return messages.map((msg) => {
+      if (msg.role !== 'assistant') return msg;
+
+      // Extract text and tool call IDs from this message
+      const textParts: string[] = [];
+      const toolCallIds: string[] = [];
+      for (const part of msg.content) {
+        if (part.type === 'text') textParts.push(part.value);
+        if (part.type === 'tool-call') toolCallIds.push(part.toolCall.callId);
+      }
+
+      // Look up cached thinking
+      const cached = this.getCachedThinking(textParts.join('\n'), toolCallIds);
+      if (!cached) return msg;
+
+      // Prepend thinking part to the message content
+      const thinkingPart: ChatMessageContentPart = {
+        type: 'thinking',
+        value: cached.thinking,
+      };
+      if (cached.signature) {
+        (thinkingPart as { type: 'thinking'; value: string; signature?: string }).signature = cached.signature;
+      }
+      const enriched: ChatMessage = {
+        ...msg,
+        content: [thinkingPart, ...msg.content],
+      };
+      return enriched;
+    });
   }
 }
 

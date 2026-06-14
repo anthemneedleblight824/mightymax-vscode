@@ -6,6 +6,24 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-06-14
+
+### Added
+
+- **Smart tool filtering**: When M3 receives 80+ tools (common in MCP-heavy VS Code setups) it stops calling tools and generates text instead. Smart filtering automatically scores and reduces the tool set sent per request based on keyword relevance, historical call frequency, or a hybrid of both. New settings: `mightyMax.enableSmartToolFiltering` (default `true`), `mightyMax.maxTools` (default `30`), `mightyMax.alwaysIncludeTools` (priority list), `mightyMax.toolFilterStrategy` (`"relevance"` | `"usage"` | `"hybrid"`). See `SMART_TOOL_FILTERING.md` for details.
+- **Thinking block passback cache**: A per-provider shadow cache stores thinking blocks with their Anthropic signatures keyed by a hash of the preceding assistant message. Cached blocks are re-injected into enriched messages before each request so M3 extended-thinking round-trips survive VS Code's history reconstruction, bridging the gap until `LanguageModelThinkingPart` is available in `@types/vscode`.
+- **Capability validation guards**: `evaluateAgentEligibility` now rejects model capability objects that carry non-boolean flags (e.g. a string `"true"`) and returns typed reasons explaining the failure instead of silently producing incorrect eligibility.
+- **`tool-call` / `tool-result` callId validation**: `validateMessages` now emits a `missing-tool-call-id` error for any tool-call or tool-result part that lacks a non-empty `callId`, surfacing wire mistakes before they reach the transport.
+- **Robust `callId` extraction**: new `partCallId` helper resolves the call id from `part.callId`, `part.toolCall.callId`, or `part.toolResult.callId` to cover all shaped variants that flow through the mapper.
+- **Tool usage statistics**: `ChatProvider` accumulates per-tool call counts across the provider lifetime; the smart filter uses these counts to prioritise tools that have been successfully called before.
+
+### Changed
+
+- **`mapRequestToMiniMax` uses enriched messages**: thinking-block injection happens before the mapper sees messages, so the Anthropic `thinking` blocks land in the correct assistant turn on the wire.
+- **`StartStreamingRequest` extended**: `MiniMaxClient` port now carries optional `thinking` configuration (`type`, `budgetTokens`) surfaced from `ThinkingStyle` so the transport can forward the right extended-thinking parameters to MiniMax.
+- **Streaming log level raised to `info`**: the "Starting streaming request" log line is now `info` (was `debug`) and includes `toolMode` and the full tool name list for easier on-call diagnosis.
+- **`MappingValidationError` code union extended**: the discriminated `code` type now includes `'missing-tool-call-id'` so callers get exhaustive narrowing.
+
 ### Fixed
 
 - **Transient 5xx server errors now retried**: `MiniMaxClientAdapter` now retries 500, 502, 503, 504, and 529 (overloaded) responses with the same bounded exponential backoff strategy used for 429 and network errors (up to `maxRetries` attempts). Previously all 5xx errors failed immediately on first occurrence. The transport also logs detailed request/response diagnostics for all 5xx errors similar to 400 errors, making server-side failures easier to diagnose.

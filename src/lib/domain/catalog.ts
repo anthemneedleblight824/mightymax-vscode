@@ -244,10 +244,8 @@ export const DEFAULT_LIVE_DEFAULTS: Readonly<LiveModelDefaults> = Object.freeze(
 });
 
 /**
- * Strip a `MiniMax-` prefix from a model id (case-insensitive) so the
- * live endpoint can be queried with either `M3` or `MiniMax-M3` and
- * the catalog id stays consistent. Returns the input unchanged when no
- * prefix is present.
+ * Normalize a model id to the catalog form. Bare ids like `M3` gain the
+ * `MiniMax-` prefix; ids already in catalog form are returned unchanged.
  */
 export function normalizeModelId(raw: string): string {
   if (typeof raw !== 'string' || raw.length === 0) return raw;

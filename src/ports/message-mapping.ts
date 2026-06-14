@@ -86,7 +86,12 @@ export type ChatMessageContentPart =
       readonly data: Uint8Array;
     }
   | { readonly type: 'tool-call'; readonly toolCall: ChatToolCallPart }
-  | { readonly type: 'tool-result'; readonly toolResult: ChatToolResultPart };
+  | { readonly type: 'tool-result'; readonly toolResult: ChatToolResultPart }
+  | {
+      readonly type: 'thinking';
+      readonly value: string;
+      readonly signature?: string;
+    };
 
 /**
  * A domain-neutral chat message, mirroring
@@ -126,10 +131,13 @@ export interface ChatUsageData {
  * deltas to VS Code. Includes text, thinking (reasoning), usage
  * data, and tool calls. Thinking parts are NEVER emitted as
  * visible text; they surface via `LanguageModelThinkingPart` only.
+ *
+ * The signature field on thinking parts (M3 only) MUST be preserved
+ * and returned in the next request to maintain the reasoning chain.
  */
 export type ChatResponsePart =
   | { readonly type: 'text'; readonly value: string }
-  | { readonly type: 'thinking'; readonly value: string }
+  | { readonly type: 'thinking'; readonly value: string; readonly signature?: string }
   | { readonly type: 'usage'; readonly usage: ChatUsageData }
   | { readonly type: 'tool-call'; readonly toolCall: ChatToolCallPart };
 

@@ -6,6 +6,9 @@ import type { Logger } from './logger.js';
  * (text + image_url). The MiniMax endpoint accepts the same shape on
  * the `/v1/chat/completions` route. T04 produces these from VS Code
  * `ChatMessage` content parts; the transport (T05) serializes them.
+ *
+ * The 'thinking' type is M3 Anthropic-specific and carries the signed
+ * reasoning block that MUST be preserved across turns.
  */
 export type MiniMaxWireContentPart =
   | { readonly type: 'text'; readonly text: string }
@@ -15,6 +18,11 @@ export type MiniMaxWireContentPart =
         readonly url: string;
         readonly detail?: 'low' | 'high' | 'auto' | undefined;
       };
+    }
+  | {
+      readonly type: 'thinking';
+      readonly thinking: string;
+      readonly signature?: string;
     };
 
 /**
@@ -88,8 +96,13 @@ export interface MiniMaxStreamEvent {
    * `delta.thinking` field; the transport (T05) surfaces it as a
    * `thinkingDelta` event after the per-block split. Mapped to
    * `LanguageModelThinkingPart` by T04.
+   *
+   * The `signature` field is the cryptographic signature of the thinking
+   * block (M3 only). When present, it MUST be preserved and returned in
+   * the next request to maintain the reasoning chain.
    */
   thinkingDelta?: string;
+  thinkingSignature?: string;
   /** Incremental tool-call argument token; accumulator logic lives in T03. */
   toolCallDelta?: { index: number; id?: string; name?: string; argumentsDelta?: string };
   /** Final usage block; emitted once at the end of the stream. */

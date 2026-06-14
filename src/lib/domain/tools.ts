@@ -131,7 +131,11 @@ export function mapToolModeToChoice(
  */
 export function serializeToolResultContent(content: ReadonlyArray<unknown>): string {
   return content
-    .map((piece) => (typeof piece === 'string' ? piece : JSON.stringify(piece)))
+    .map((piece) => {
+      if (typeof piece === 'string') return piece;
+      const serialized = JSON.stringify(piece);
+      return serialized ?? 'null';
+    })
     .join('\n');
 }
 
@@ -214,10 +218,11 @@ export interface AccumulatorStep {
 }
 
 /**
- * Feed a single tool-call delta into the accumulator. The state is
- * mutated in place for performance, but the function is referentially
- * transparent: given the same `state` and `event`, it always returns
- * the same `parts` and a `state` with the same effective contents.
+ * Feed a single tool-call delta into the accumulator. The function
+ * clones the underlying map and returns a new state object so callers
+ * can treat the accumulator as immutable. Given the same `state` and
+ * `event`, it always returns the same `parts` and a `state` with the
+ * same effective contents.
  *
  * Per the OpenAI-compatible wire spec, tool-call deltas carry:
  *  - `index`              — the call's position in the `tool_calls` array.

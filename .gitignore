@@ -22,3 +22,4 @@ reference_projects/
 
 # Local-only: API key for one-shot MiniMax context_management probe. Do not commit.
 .mighty-max-probe-key
+IMPLEMENTATION_SUMMARY.md

@@ -29,6 +29,22 @@ export interface AgentEligibility {
  */
 export function evaluateAgentEligibility(capabilities: ModelCapabilities): AgentEligibility {
   const reasons: string[] = [];
+  const invalidFlags = [
+    ['toolCalling', capabilities.toolCalling],
+    ['imageInput', capabilities.imageInput],
+    ['thinking', capabilities.thinking],
+  ]
+    .filter(([, value]) => typeof value !== 'boolean')
+    .map(([name]) => name);
+
+  if (invalidFlags.length > 0) {
+    reasons.push(`model capabilities must be boolean flags (invalid: ${invalidFlags.join(', ')})`);
+    return {
+      utilityEligible: false,
+      agentEligible: false,
+      reasons,
+    };
+  }
 
   if (!capabilities.toolCalling) {
     reasons.push('tool calling is not advertised on this model');

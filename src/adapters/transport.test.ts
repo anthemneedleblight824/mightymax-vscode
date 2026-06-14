@@ -526,6 +526,78 @@ describe('MiniMaxClientAdapter — Anthropic dialect', () => {
     }
   });
 
+  it('preserves a later thinking signature on one of the emitted thinking deltas', async () => {
+    const m3Request: MiniMaxCompletionRequest = {
+      ...defaultRequest,
+      model: 'MiniMax-M3',
+      maxTokens: 1024,
+    };
+    const records: SseRecord[] = [
+      { event: 'message_start', data: JSON.stringify({ type: 'message_start' }) },
+      {
+        event: 'content_block_start',
+        data: JSON.stringify({
+          type: 'content_block_start',
+          index: 0,
+          content_block: { type: 'thinking', thinking: '' },
+        }),
+      },
+      {
+        event: 'content_block_delta',
+        data: JSON.stringify({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'thinking_delta', thinking: 'part one ' },
+        }),
+      },
+      {
+        event: 'content_block_delta',
+        data: JSON.stringify({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'signature_delta', signature: 'sig_abc123' },
+        }),
+      },
+      {
+        event: 'content_block_delta',
+        data: JSON.stringify({
+          type: 'content_block_delta',
+          index: 0,
+          delta: { type: 'thinking_delta', thinking: 'part two' },
+        }),
+      },
+      {
+        event: 'content_block_stop',
+        data: JSON.stringify({ type: 'content_block_stop', index: 0 }),
+      },
+      {
+        event: 'message_delta',
+        data: JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+      },
+      { event: 'message_stop', data: JSON.stringify({ type: 'message_stop' }) },
+    ];
+    const server = await startMockServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.end(serializeSse(records));
+    });
+
+    try {
+      const client = makeClient(() => server.url);
+      const events = await collectEvents(client, m3Request, neverAbort, makeRecordingLogger());
+      const thinking = events.filter((e) => e.thinkingDelta !== undefined);
+      strictEqual(thinking.length, 2, 'expected one event per thinking delta');
+      strictEqual(thinking[0]?.thinkingDelta, 'part one ');
+      strictEqual(thinking[1]?.thinkingDelta, 'part two');
+      strictEqual(
+        thinking.filter((event) => event.thinkingSignature === 'sig_abc123').length,
+        1,
+        'exactly one emitted thinking delta should carry the block signature',
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
   it('surfaces tool_use blocks as toolCallDelta', async () => {
     const m3Request: MiniMaxCompletionRequest = {
       ...defaultRequest,
@@ -867,24 +939,28 @@ describe('MiniMaxClientAdapter — 5xx server errors', () => {
     try {
       const client = makeClient(() => server.url);
       const logger = makeRecordingLogger();
-      await rejects(
-        collectEvents(client, defaultRequest, neverAbort, logger),
-        (err: unknown) => {
-          ok(err instanceof MiniMaxClientError);
-          strictEqual(err.kind, 'http');
-          strictEqual(err.status, 500);
-          ok(err.retriable, '500 should be marked as retriable');
-          return true;
-        },
-      );
+      await rejects(collectEvents(client, defaultRequest, neverAbort, logger), (err: unknown) => {
+        ok(err instanceof MiniMaxClientError);
+        strictEqual(err.kind, 'http');
+        strictEqual(err.status, 500);
+        ok(err.retriable, '500 should be marked as retriable');
+        return true;
+      });
       // maxRetries=2 → 1 initial + 2 retries = 3 attempts
       strictEqual(attempts, 3, 'expected 3 attempts for 500 error');
       // Logger should have retry warnings
-      const warns = logger.calls.filter((c) => c.level === 'warn' && c.message.includes('5xx server error'));
+      const warns = logger.calls.filter(
+        (c) => c.level === 'warn' && c.message.includes('5xx server error'),
+      );
       ok(warns.length >= 2, `expected at least 2 retry warnings, got ${warns.length}`);
       // Logger should have error logs with request details
-      const errors = logger.calls.filter((c) => c.level === 'error' && c.message.includes('Server Error'));
-      ok(errors.length >= 3, `expected at least 3 error logs (one per attempt), got ${errors.length}`);
+      const errors = logger.calls.filter(
+        (c) => c.level === 'error' && c.message.includes('Server Error'),
+      );
+      ok(
+        errors.length >= 3,
+        `expected at least 3 error logs (one per attempt), got ${errors.length}`,
+      );
     } finally {
       await server.close();
     }

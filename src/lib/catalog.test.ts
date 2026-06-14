@@ -102,6 +102,12 @@ describe('BUILT_IN_CATALOG', () => {
 });
 
 describe('validateCatalog', () => {
+  it('rejects entries missing the id field', () => {
+    const errors = validateCatalog([makeEntry({ id: '' as unknown as CatalogEntry['id'] })]);
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0]?.code, 'missing-required-field');
+  });
+
   it('rejects duplicate ids', () => {
     const errors = validateCatalog([
       makeEntry({ id: 'MiniMax-M3' }),
@@ -231,6 +237,36 @@ describe('mergeCatalog', () => {
     mergeCatalog(BUILT_IN_CATALOG, live);
     assert.deepEqual(BUILT_IN_CATALOG, staticCopy);
     assert.deepEqual(live, liveCopy);
+  });
+
+  it('drops unusable live entries with missing ids or non-positive token budgets', () => {
+    const merged = mergeCatalog(BUILT_IN_CATALOG, [
+      makeEntry({ id: '' as unknown as CatalogEntry['id'] }),
+      makeEntry({ id: 'MiniMax-bad-budget', maxOutputTokens: 0 }),
+    ]);
+    assert.equal(merged.length, BUILT_IN_CATALOG.length);
+  });
+
+  it('fills display, vendor, family, and detail defaults for sparse live entries', () => {
+    const merged = mergeCatalog(BUILT_IN_CATALOG, [
+      {
+        id: 'MiniMax-M4-sparse',
+        displayName: '',
+        vendor: '',
+        family: '',
+        maxInputTokens: 123_000,
+        maxOutputTokens: 7_000,
+        capabilities: { toolCalling: true, imageInput: false, thinking: false },
+        thinkingStyle: 'none',
+        detail: '',
+      },
+    ]);
+    const entry = merged.find((model) => model.id === 'MiniMax-M4-sparse');
+    assert.ok(entry);
+    assert.equal(entry.displayName, 'M (MiniMax-M4-sparse)');
+    assert.equal(entry.vendor, 'minimax');
+    assert.equal(entry.family, 'minimax');
+    assert.equal(entry.detail, '130K ctx · 7K out');
   });
 });
 

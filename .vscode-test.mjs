@@ -49,4 +49,30 @@ export default defineConfig([
       timeout: 30_000,
     },
   },
+  {
+    label: 'thinking-passback',
+    // Thinking pass-back validation: tests the complete thinking + tool-calling
+    // flow to ensure thinking blocks with signatures are captured, cached, and
+    // replayed correctly across multi-turn conversations.
+    files: 'out/test/thinking-passback.test.js',
+    version: 'stable',
+    launchArgs: ['--disable-extensions', '--disable-updates'],
+    mocha: {
+      ui: 'bdd',
+      timeout: 30_000,
+    },
+  },
+  {
+    label: 'tool-filtering',
+    // Smart tool filtering validation: tests the filtering logic to ensure
+    // tools are correctly prioritized and filtered based on relevance, usage,
+    // and configuration settings.
+    files: 'out/test/tool-filtering.test.js',
+    version: 'stable',
+    launchArgs: ['--disable-extensions', '--disable-updates'],
+    mocha: {
+      ui: 'bdd',
+      timeout: 30_000,
+    },
+  },
 ]);

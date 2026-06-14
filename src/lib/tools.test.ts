@@ -40,6 +40,11 @@ describe('mapToolsToMiniMax', () => {
     deepStrictEqual(mapToolsToMiniMax([]), []);
   });
 
+  it('throws for an invalid empty tool name because the wire request would be unusable', () => {
+    const tools: ChatTool[] = [{ name: '', description: 'broken tool' }];
+    failIfDoesNotThrow(() => mapToolsToMiniMax(tools));
+  });
+
   it('preserves the name and description for a single tool', () => {
     const tools: ChatTool[] = [{ name: 'read_file', description: 'Reads a file from disk.' }];
     const mapped = mapToolsToMiniMax(tools);
@@ -224,6 +229,11 @@ describe('mapToolResultToMiniMax', () => {
     const s = serializeToolResultContent([1, 2, 3]);
     deepStrictEqual(s, '1\n2\n3');
   });
+
+  it('normalizes undefined content entries to JSON null instead of dropping them silently', () => {
+    const s = serializeToolResultContent([undefined, null, 'tail']);
+    deepStrictEqual(s, 'null\nnull\ntail');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -324,6 +334,23 @@ describe('accumulateToolCallDelta', () => {
     // not lost.
     equal(result.state.perIndex.size, 1);
   });
+
+  it('emits a typed ToolSchemaError when the same index is reassigned to a different call id', () => {
+    let state = accumulatorSeed();
+    state = accumulateToolCallDelta(state, { index: 0, id: 'call_1', name: 'fn' }).state;
+    const result = accumulateToolCallDelta(state, { index: 0, id: 'call_2', name: 'fn' });
+
+    equal(result.parts.length, 1);
+    const part = result.parts[0];
+    if (!isToolSchemaError(part)) {
+      fail('expected a duplicate-call-id error envelope, got a tool-call part');
+    }
+    deepStrictEqual(part, {
+      kind: 'duplicate-call-id',
+      callId: 'call_2',
+      index: 0,
+    } satisfies ToolSchemaError);
+  });
 });
 
 describe('finalizeAccumulator', () => {
@@ -365,6 +392,25 @@ describe('finalizeAccumulator', () => {
       index: 0,
       rawArguments: 'not-json-at-all',
       repairAttempted: true,
+    } satisfies ToolSchemaError);
+  });
+
+  it('surfaces a typed argument-parse-failed error when a call never received an id or name', () => {
+    let state = accumulatorSeed();
+    state = accumulateToolCallDelta(state, { index: 0, argumentsDelta: '{"x":1}' }).state;
+
+    const parts = finalizeAccumulator(state);
+    equal(parts.length, 1);
+    const err = parts[0];
+    if (!isToolSchemaError(err)) {
+      fail('expected an argument-parse-failed error envelope, got a tool-call part');
+    }
+    deepStrictEqual(err, {
+      kind: 'argument-parse-failed',
+      callId: '',
+      index: 0,
+      rawArguments: '{"x":1}',
+      repairAttempted: false,
     } satisfies ToolSchemaError);
   });
 });
@@ -426,3 +472,15 @@ describe('MiniMax tool definition shape', () => {
 // Suppress unused import warning for `deepEqual` — kept for future
 // structural-comparison tests without changing imports later.
 void deepEqual;
+
+function failIfDoesNotThrow(fn: () => unknown): void {
+  let threw = false;
+  try {
+    fn();
+  } catch {
+    threw = true;
+  }
+  if (!threw) {
+    fail('expected function to throw');
+  }
+}

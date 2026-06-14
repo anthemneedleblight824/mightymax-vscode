@@ -602,6 +602,20 @@ describe('mapStreamDeltaToResponseParts — thinking (reasoning)', () => {
     }
   });
 
+  it('preserves thinking signatures on thinkingDelta parts', () => {
+    const out = mapStreamDeltaToResponseParts(
+      { thinkingDelta: 'Signed reasoning.', thinkingSignature: 'sig_123' },
+      'anthropic',
+    );
+    const parts = partsOnly(out);
+    equal(parts.length, 1);
+    equal(parts[0]?.type, 'thinking');
+    if (parts[0]?.type === 'thinking') {
+      equal(parts[0].value, 'Signed reasoning.');
+      equal(parts[0].signature, 'sig_123');
+    }
+  });
+
   it('emits M2.x reasoningDelta as a thinking part, never as text', () => {
     const out = mapStreamDeltaToResponseParts(
       { reasoningDelta: 'I am thinking about this carefully.' },
@@ -771,6 +785,19 @@ describe('mapMiniMaxUsage', () => {
     // chat-provider can derive it as prompt + completion if it
     // needs the running total.
     ok(!('totalTokens' in usage));
+  });
+
+  it('ignores non-numeric runtime token values', () => {
+    const usage = mapMiniMaxUsage({
+      promptTokens: Number.NaN,
+      completionTokens: '2' as unknown as number,
+      cacheReadTokens: Infinity,
+      cacheCreateTokens: 3,
+    });
+    equal(usage.promptTokens, undefined);
+    equal(usage.completionTokens, undefined);
+    equal(usage.cacheReadTokens, undefined);
+    equal(usage.cacheCreateTokens, 3);
   });
 });
 
